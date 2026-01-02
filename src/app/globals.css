@@ -1,0 +1,76 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --bg: #F8FAFC;
+  --card: #FFFFFF;
+  --border: #E2E8F0;
+  --text: #0F172A;
+  --muted: #475569;
+  --primary: #4F46E5;
+  --primary-hover: #4338CA;
+  --success: #059669;
+  --warning: #D97706;
+  --danger: #E11D48;
+}
+
+@layer base {
+  body {
+    background-color: var(--bg);
+    color: var(--text);
+  }
+}
+
+@layer components {
+  .app-card {
+    background-color: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 0.75rem;
+    box-shadow: 0 1px 2px 0 rgb(0 0 0 / 0.05);
+  }
+
+  .app-btn-primary {
+    background-color: var(--primary);
+    color: white;
+    border-radius: 0.375rem;
+    box-shadow: 0 1px 2px 0 rgb(0 0 0 / 0.05);
+    font-weight: 500;
+    transition: background-color 0.2s;
+  }
+
+  .app-btn-primary:hover {
+    background-color: var(--primary-hover);
+  }
+
+  .app-btn-primary:focus {
+    outline: none;
+    ring: 2px;
+    ring-color: rgb(199 210 254);
+  }
+
+  .app-btn-secondary {
+    background-color: var(--card);
+    border: 1px solid var(--border);
+    color: var(--text);
+    border-radius: 0.375rem;
+    box-shadow: 0 1px 2px 0 rgb(0 0 0 / 0.05);
+    font-weight: 500;
+    transition: background-color 0.2s;
+  }
+
+  .app-btn-secondary:hover {
+    background-color: #F1F5F9;
+  }
+
+  .app-btn-secondary:focus {
+    outline: none;
+    ring: 2px;
+    ring-color: rgb(199 210 254);
+  }
+
+  .app-badge {
+    border-radius: 9999px;
+    border: 1px solid var(--border);
+  }
+}
