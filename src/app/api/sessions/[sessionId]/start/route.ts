@@ -1,81 +1,167 @@
 import { NextResponse } from "next/server";
-import { getSession, updateSession } from "@/lib/sessionStore";
-import { openai } from "@/lib/openai";
+import { getSession, updateSession, logAudit } from "@/lib/unifiedStore";
+import { getOpenAI } from "@/lib/openai";
 import { buildQuestionGenPrompt } from "@/lib/prompts";
 import { InterviewQuestion } from "@/lib/types";
+import { apiSuccess, apiError } from "@/lib/apiResponse";
+import { logger } from "@/lib/logger";
 
 export async function POST(
   _req: Request,
   { params }: { params: { sessionId: string } }
 ) {
-  const existing = getSession(params.sessionId);
-  if (!existing) {
-    return NextResponse.json({ error: "Session not found" }, { status: 404 });
-  }
-
-  if (!process.env.OPENAI_API_KEY) {
-    return NextResponse.json(
-      { error: "OPENAI_API_KEY missing" },
-      { status: 500 }
-    );
-  }
-
-  // If already started and has questions, do nothing
-  if (existing.questions.length > 0) {
-    return NextResponse.json({ ok: true, alreadyStarted: true });
-  }
-
-  const prompt = buildQuestionGenPrompt({
-    mode: existing.mode,
-    role: existing.role,
-    level: existing.level,
-    resumeText: existing.resumeText,
-    jdText: existing.jdText,
-    count: 8,
-  });
-
-  const resp = await openai.chat.completions.create({
-    model: "gpt-4o-mini",
-    temperature: 0.4,
-    messages: [
-      { role: "system", content: "You generate interview questions as JSON." },
-      { role: "user", content: prompt },
-    ],
-  });
-
-  const raw = resp.choices[0]?.message?.content ?? "";
-
-  let parsed: { questions: InterviewQuestion[] };
   try {
-    parsed = JSON.parse(raw);
-  } catch {
-    return NextResponse.json(
-      { error: "Failed to parse model JSON", raw },
-      { status: 500 }
-    );
-  }
+    const existing = await getSession(params.sessionId);
+    if (!existing) {
+      return apiError("Session not found", "The requested session does not exist", 404);
+    }
 
-  if (
-    !parsed.questions ||
-    !Array.isArray(parsed.questions) ||
-    parsed.questions.length === 0
-  ) {
-    return NextResponse.json(
-      { error: "Model returned no questions", raw },
-      { status: 500 }
-    );
-  }
+    if (!process.env.OPENAI_API_KEY) {
+      return apiError(
+        "Configuration error",
+        "OPENAI_API_KEY is not configured",
+        500
+      );
+    }
 
-  const updated = updateSession(params.sessionId, (s) => ({
-    ...s,
-    status: "in_progress",
-    questions: parsed.questions.map((q, i) => ({
-      ...q,
+    // If already started and has questions, return success
+    if (existing.questions && existing.questions.length > 0) {
+      const response = apiSuccess(
+        { 
+          alreadyStarted: true,
+          total: existing.questions.length 
+        },
+        "Interview already started"
+      );
+      response.headers.set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+      response.headers.set('Pragma', 'no-cache');
+      response.headers.set('Expires', '0');
+      return response;
+    }
+
+    // Validate required fields
+    if (!existing.resumeText || existing.resumeText.length < 50) {
+      return apiError(
+        "Validation failed",
+        "Resume text is required and must be at least 50 characters",
+        400
+      );
+    }
+
+    // Get question count from jobSetup config if available
+    const questionCount = existing.jobSetup?.config?.questionCount || 8;
+    const jdText = existing.jdText || existing.jobSetup?.jdText;
+
+    // Generate questions
+    const prompt = buildQuestionGenPrompt({
+      mode: existing.mode,
+      role: existing.role,
+      level: existing.level,
+      resumeText: existing.resumeText,
+      jdText: jdText,
+      count: questionCount,
+    });
+
+    const resp = await getOpenAI().chat.completions.create({
+      model: "gpt-4o-mini",
+      temperature: 0.4,
+      response_format: { type: "json_object" } as any,
+      messages: [
+        { role: "system", content: "Return JSON only. No markdown. Use this exact format: {\"questions\":[{\"id\":\"q1\",\"text\":\"...\",\"category\":\"technical\",\"difficulty\":\"medium\"}]}" },
+        { role: "user", content: prompt },
+      ],
+    });
+
+    const raw = resp.choices[0]?.message?.content ?? "";
+    if (!raw) {
+      return apiError(
+        "OpenAI API error",
+        "OpenAI returned empty response",
+        500
+      );
+    }
+
+    // Parse JSON response
+    let parsed: { questions: InterviewQuestion[] };
+    try {
+      const cleaned = raw.replace(/```json\n?/g, "").replace(/```\n?/g, "").trim();
+      parsed = JSON.parse(cleaned);
+    } catch (parseError) {
+      logger.error("JSON parse error", parseError instanceof Error ? parseError : new Error(String(parseError)), { raw: raw.substring(0, 200) });
+      return apiError(
+        "Failed to parse model response",
+        "The AI model returned invalid JSON",
+        500,
+        { raw: raw.substring(0, 500) }
+      );
+    }
+
+    if (!parsed.questions || !Array.isArray(parsed.questions) || parsed.questions.length === 0) {
+      return apiError(
+        "Model returned no questions",
+        "The AI model did not generate any questions",
+        500,
+        { raw: raw.substring(0, 200) }
+      );
+    }
+
+    // Normalize questions
+    const questions = parsed.questions.map((q, i) => ({
       id: q.id || `q${i + 1}`,
-    })),
-    currentQuestionIndex: 0,
-  }));
+      text: q.text || `Question ${i + 1}`,
+      category: q.category || "technical",
+      difficulty: q.difficulty || "medium",
+    }));
 
-  return NextResponse.json({ ok: true, total: updated?.questions.length ?? 0 });
+    // Update session with questions
+    const updated = await updateSession(params.sessionId, (s) => ({
+      ...s,
+      status: "in_progress",
+      questions: questions,
+      currentQuestionIndex: 0,
+    }));
+
+    if (!updated) {
+      return apiError(
+        "Failed to update session",
+        "Could not save questions to session",
+        500
+      );
+    }
+
+    // Verify questions were saved
+    if (!updated.questions || updated.questions.length === 0) {
+      return apiError(
+        "Questions not saved",
+        "Questions were not saved correctly to the session",
+        500
+      );
+    }
+
+    await logAudit('interview_started', 'session', params.sessionId, {
+      question_count: questions.length,
+    });
+
+    const response = apiSuccess(
+      { 
+        total: updated.questions.length,
+        questions: updated.questions,
+      },
+      "Interview started successfully"
+    );
+
+    // Disable caching
+    response.headers.set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+    response.headers.set('Pragma', 'no-cache');
+    response.headers.set('Expires', '0');
+
+    return response;
+  } catch (error) {
+    logger.error("Error in start route", error instanceof Error ? error : new Error(String(error)), { sessionId: params.sessionId });
+    return apiError(
+      "Internal server error",
+      error instanceof Error ? error.message : "An unexpected error occurred",
+      500
+    );
+  }
 }
-

@@ -2,14 +2,14 @@ import { notFound } from "next/navigation";
 import Container from "@/components/Container";
 import Card from "@/components/Card";
 import ReportView from "@/components/ReportView";
-import { findSessionByShareToken } from "@/lib/sessionStore";
+import { findSessionByShareToken } from "@/lib/unifiedStore";
 
 export default async function SharePage({
   params,
 }: {
   params: { token: string };
 }) {
-  const session = findSessionByShareToken(params.token);
+  const session = await findSessionByShareToken(params.token);
 
   if (!session || !session.report) {
     notFound();
@@ -35,6 +35,7 @@ export default async function SharePage({
               level: session.level,
             }}
             readOnly={true}
+            viewType="recruiter"
           />
         </Card>
       </Container>

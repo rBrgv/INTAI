@@ -1,5 +1,7 @@
+import { ArrowRight, CheckCircle2, FileDown } from "lucide-react";
 import Card from "./Card";
 import Badge from "./Badge";
+import { sanitizeForDisplay } from "@/lib/sanitize";
 
 type ReportViewProps = {
   report: {
@@ -31,6 +33,7 @@ type ReportViewProps = {
     level?: string;
   };
   readOnly?: boolean;
+  viewType?: "candidate" | "recruiter"; // Default to "recruiter" for backward compatibility
 };
 
 export default function ReportView({
@@ -38,32 +41,120 @@ export default function ReportView({
   scoreSummary,
   context,
   readOnly = false,
+  viewType = "recruiter",
 }: ReportViewProps) {
+  // For candidate view, hide "no_hire" recommendation and show "borderline" instead
+  const displayRecommendation = viewType === "candidate" && report.recommendation === "no_hire" 
+    ? "borderline" 
+    : report.recommendation;
+
+  const handleExportPDF = () => {
+    // Add metadata to document before printing
+    const printWindow = window.open('', '_blank');
+    if (printWindow) {
+      const printContent = document.querySelector('[data-report-content]')?.innerHTML || document.body.innerHTML;
+      printWindow.document.write(`
+        <!DOCTYPE html>
+        <html>
+          <head>
+            <title>Interview Report - ${new Date().toLocaleDateString()}</title>
+            <style>
+              @media print {
+                @page {
+                  size: A4;
+                  margin: 1cm;
+                }
+                body {
+                  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+                  font-size: 12pt;
+                  line-height: 1.6;
+                  color: #000;
+                }
+                .no-print {
+                  display: none !important;
+                }
+                h1, h2, h3, h4, h5, h6 {
+                  page-break-after: avoid;
+                }
+                .page-break {
+                  page-break-before: always;
+                }
+                .header {
+                  border-bottom: 2px solid #000;
+                  padding-bottom: 10px;
+                  margin-bottom: 20px;
+                }
+                .footer {
+                  border-top: 1px solid #ccc;
+                  padding-top: 10px;
+                  margin-top: 20px;
+                  font-size: 10pt;
+                  color: #666;
+                }
+              }
+            </style>
+          </head>
+          <body>
+            <div class="header">
+              <h1>Interview Report</h1>
+              <p>Generated: ${new Date().toLocaleString()}</p>
+            </div>
+            ${printContent}
+            <div class="footer">
+              <p>Report ID: ${context?.mode || 'N/A'} - ${new Date().toISOString()}</p>
+            </div>
+          </body>
+        </html>
+      `);
+      printWindow.document.close();
+      printWindow.focus();
+      setTimeout(() => {
+        printWindow.print();
+        printWindow.close();
+      }, 250);
+    } else {
+      // Fallback to standard print
+      window.print();
+    }
+  };
+
   return (
-    <div className="space-y-6">
+    <div className="space-y-6" data-report-content>
+      {/* Export Button - At the top */}
+      {!readOnly && (
+        <div className="flex justify-end no-print mb-2">
+          <button
+            onClick={handleExportPDF}
+            className="app-btn-primary px-4 py-2 text-sm flex items-center gap-2"
+          >
+            <FileDown className="w-4 h-4" />
+            Export as PDF
+          </button>
+        </div>
+      )}
       {/* Hero Header */}
       <div className="rounded-lg bg-gradient-to-r from-blue-50 to-indigo-50 border border-blue-200 p-6">
         <div className="flex items-center justify-between mb-3">
           <h4 className="text-lg font-semibold text-slate-900">Recommendation</h4>
           <Badge
             variant={
-              report.recommendation === "strong_hire"
+              displayRecommendation === "strong_hire"
                 ? "success"
-                : report.recommendation === "hire"
+                : displayRecommendation === "hire"
                 ? "info"
-                : report.recommendation === "borderline"
+                : displayRecommendation === "borderline"
                 ? "warning"
                 : "error"
             }
           >
-            {report.recommendation.replace("_", " ").toUpperCase()}
+            {displayRecommendation.replace("_", " ").toUpperCase()}
           </Badge>
         </div>
         <p className="text-sm text-slate-600 mb-2">
           Confidence: <span className="font-semibold">{report.confidence}%</span>
         </p>
         <p className="text-sm text-slate-700 whitespace-pre-line leading-relaxed">
-          {report.executiveSummary}
+          {sanitizeForDisplay(report.executiveSummary)}
         </p>
       </div>
 
@@ -75,7 +166,11 @@ export default function ReportView({
               <div>
                 <span className="text-slate-500">Mode:</span>{" "}
                 <span className="font-medium">
-                  {context.mode === "company" ? "Company" : "Open Market"}
+                  {context.mode === "company" 
+                    ? "Company" 
+                    : context.mode === "college"
+                    ? "College"
+                    : "Individual"}
                 </span>
               </div>
             )}
@@ -115,7 +210,7 @@ export default function ReportView({
           <ul className="space-y-2 text-sm text-slate-700">
             {report.strengths.map((s, i) => (
               <li key={i} className="flex items-start">
-                <span className="text-green-600 mr-2 mt-0.5">✓</span>
+                <CheckCircle2 className="w-3 h-3 text-green-600 mr-2 mt-0.5 inline" />
                 {s}
               </li>
             ))}
@@ -127,8 +222,8 @@ export default function ReportView({
           <ul className="space-y-2 text-sm text-slate-700">
             {report.gapsAndRisks.map((g, i) => (
               <li key={i} className="flex items-start">
-                <span className="text-yellow-600 mr-2 mt-0.5">→</span>
-                {g}
+                <ArrowRight className="w-3 h-3 text-yellow-600 mr-2 mt-0.5 inline" />
+                {sanitizeForDisplay(g)}
               </li>
             ))}
           </ul>
@@ -142,13 +237,13 @@ export default function ReportView({
           {report.evidence.map((e, i) => (
             <div key={i} className="rounded-md bg-slate-50 border border-slate-200 p-4">
               <div className="flex items-start justify-between mb-2">
-                <p className="text-sm font-medium text-slate-900 flex-1">{e.claim}</p>
+                <p className="text-sm font-medium text-slate-900 flex-1">{sanitizeForDisplay(e.claim)}</p>
                 <Badge variant="info" className="ml-2">
                   {(e.evidenceType || "technical").replace("_", " ")}
                 </Badge>
               </div>
               <p className="text-sm text-slate-600 italic mb-1">
-                "{e.supportingAnswerSnippet}"
+                "{sanitizeForDisplay(e.supportingAnswerSnippet)}"
               </p>
               <p className="text-xs text-slate-500">Question: {e.relatedQuestionId}</p>
             </div>
@@ -160,15 +255,16 @@ export default function ReportView({
       <Card variant="outlined">
         <h5 className="text-sm font-semibold text-slate-900 mb-3">Next Round Focus</h5>
         <ul className="space-y-2 text-sm text-slate-700">
-          {report.nextRoundFocus.map((n, i) => (
-            <li key={i} className="flex items-start">
-              <span className="text-blue-600 mr-2 mt-0.5">•</span>
-              {n}
-            </li>
-          ))}
+            {report.nextRoundFocus.map((n, i) => (
+              <li key={i} className="flex items-start">
+                <span className="text-blue-600 mr-2 mt-0.5">•</span>
+                {sanitizeForDisplay(n)}
+              </li>
+            ))}
         </ul>
       </Card>
     </div>
   );
 }
+
 

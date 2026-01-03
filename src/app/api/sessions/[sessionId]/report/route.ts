@@ -1,8 +1,9 @@
 import { NextResponse } from "next/server";
-import { getSession, updateSession } from "@/lib/sessionStore";
-import { openai } from "@/lib/openai";
+import { getSession, updateSession, logAudit } from "@/lib/unifiedStore";
+import { getOpenAI } from "@/lib/openai";
 import { buildReportPrompt } from "@/lib/prompts";
 import { InterviewReport } from "@/lib/types";
+import { apiSuccess, apiError } from "@/lib/apiResponse";
 
 function clampInt(n: unknown, min: number, max: number) {
   const x = typeof n === "number" ? n : Number(n);
@@ -169,12 +170,12 @@ export async function GET(
   _req: Request,
   { params }: { params: { sessionId: string } }
 ) {
-  const session = getSession(params.sessionId);
+  const session = await getSession(params.sessionId);
   if (!session) {
-    return NextResponse.json({ error: "Session not found" }, { status: 404 });
+    return apiError("Session not found", "The requested session does not exist", 404);
   }
 
-  return NextResponse.json({ 
+  return apiSuccess({ 
     report: session.report ?? null, 
     status: session.status,
     scoreSummary: session.scoreSummary,
@@ -186,25 +187,33 @@ export async function POST(
   _req: Request,
   { params }: { params: { sessionId: string } }
 ) {
-  const session = getSession(params.sessionId);
+  const session = await getSession(params.sessionId);
   if (!session) {
-    return NextResponse.json({ error: "Session not found" }, { status: 404 });
+    return apiError("Session not found", "The requested session does not exist", 404);
   }
 
   if (session.status !== "completed") {
-    return NextResponse.json(
-      { error: "Interview not completed yet." },
-      { status: 400 }
+    return apiError(
+      "Interview not completed",
+      "The interview must be completed before generating a report",
+      400
     );
   }
 
   // If already generated, return it
   if (session.report) {
-    return NextResponse.json({ ok: true, report: session.report, cached: true });
+    return apiSuccess(
+      { report: session.report, cached: true },
+      "Report retrieved from cache"
+    );
   }
 
   if (!process.env.OPENAI_API_KEY) {
-    return NextResponse.json({ error: "OPENAI_API_KEY missing" }, { status: 500 });
+    return apiError(
+      "Configuration error",
+      "OPENAI_API_KEY is not configured",
+      500
+    );
   }
 
   const prompt = buildReportPrompt({
@@ -219,6 +228,7 @@ export async function POST(
     scoreSummary: session.scoreSummary,
   });
 
+  const openai = getOpenAI();
   const resp = await openai.chat.completions.create({
     model: "gpt-4o-mini",
     temperature: 0.2,
@@ -243,7 +253,7 @@ export async function POST(
   // Generate shareToken if not present
   const shareToken = session.shareToken || crypto.randomUUID().replaceAll("-", "");
 
-  updateSession(params.sessionId, (s) => ({ ...s, report, shareToken }));
+  await updateSession(params.sessionId, (s) => ({ ...s, report, shareToken }));
 
   return NextResponse.json({ ok: true, report, cached: false, shareToken });
 }

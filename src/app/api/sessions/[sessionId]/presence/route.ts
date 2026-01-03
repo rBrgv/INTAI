@@ -1,42 +1,44 @@
 import { NextResponse } from "next/server";
-import { getSession, updateSession } from "@/lib/sessionStore";
+import { getSession, updateSession } from "@/lib/unifiedStore";
+import { apiSuccess, apiError } from "@/lib/apiResponse";
+import { sanitizeForStorage } from "@/lib/sanitize";
 
 export async function GET(
   _req: Request,
   { params }: { params: { sessionId: string } }
 ) {
-  const session = getSession(params.sessionId);
+  const session = await getSession(params.sessionId);
   if (!session) {
-    return NextResponse.json({ error: "Session not found" }, { status: 404 });
+    return apiError("Session not found", "The requested session does not exist", 404);
   }
 
-  return NextResponse.json({ presence: session.presence ?? null });
+  return apiSuccess({ presence: session.presence ?? null });
 }
 
 export async function POST(
   req: Request,
   { params }: { params: { sessionId: string } }
 ) {
-  const session = getSession(params.sessionId);
+  const session = await getSession(params.sessionId);
   if (!session) {
-    return NextResponse.json({ error: "Session not found" }, { status: 404 });
+    return apiError("Session not found", "The requested session does not exist", 404);
   }
 
   const body = await req.json().catch(() => null);
   if (!body) {
-    return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
+    return apiError("Invalid JSON", "Request body must be valid JSON", 400);
   }
 
   const photoDataUrl = body.photoDataUrl
     ? String(body.photoDataUrl).slice(0, 1_600_000) // ~1.5MB limit
     : undefined;
   const phraseTranscript = body.phraseTranscript
-    ? String(body.phraseTranscript).slice(0, 200)
+    ? sanitizeForStorage(String(body.phraseTranscript).slice(0, 200))
     : undefined;
 
   const completedAt = phraseTranscript ? Date.now() : undefined;
 
-  updateSession(params.sessionId, (s) => ({
+  await updateSession(params.sessionId, (s) => ({
     ...s,
     presence: {
       ...s.presence,
@@ -47,6 +49,7 @@ export async function POST(
     },
   }));
 
-  return NextResponse.json({ ok: true });
+  return apiSuccess({}, "Presence check completed");
 }
+
 

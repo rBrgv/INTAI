@@ -22,8 +22,10 @@ export function buildQuestionGenPrompt(args: {
   ].join("\n");
 
   const roleInfo =
-    mode === "open"
+    mode === "individual"
       ? `Role: ${role}\nLevel: ${level}`
+      : mode === "college"
+      ? `Mode: college\nUse the JD + top skills to tailor questions.`
       : `Mode: company\nUse the JD + resume alignment to tailor questions.`;
 
   const jdBlock = jdText ? `\nJOB DESCRIPTION:\n${jdText}\n` : "";
@@ -69,8 +71,10 @@ export function buildAnswerEvalPrompt(args: {
   ].join("\n");
 
   const roleInfo =
-    mode === "open"
+    mode === "individual"
       ? `Role: ${role}\nLevel: ${level}`
+      : mode === "college"
+      ? "Mode: college\nUse JD + top skills alignment to judge relevance."
       : "Mode: company\nUse JD-resume alignment to judge relevance.";
 
   const jdBlock = jdText ? `\nJOB DESCRIPTION:\n${jdText}\n` : "";
@@ -141,8 +145,10 @@ export function buildReportPrompt(args: {
   ].join("\n");
 
   const roleInfo =
-    mode === "open"
+    mode === "individual"
       ? `Role: ${role}\nLevel: ${level}`
+      : mode === "college"
+      ? "Mode: college\nUse JD + top skills alignment."
       : "Mode: company\nUse JD-resume alignment.";
 
   const jdBlock = jdText ? `\nJOB DESCRIPTION:\n${jdText}\n` : "";

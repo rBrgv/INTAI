@@ -1,9 +1,12 @@
 import { NextResponse } from "next/server";
-import { getSession, updateSession } from "@/lib/sessionStore";
-import { openai } from "@/lib/openai";
+import { getSession, updateSession, logAudit } from "@/lib/unifiedStore";
+import { getOpenAI } from "@/lib/openai";
 import { buildAnswerEvalPrompt } from "@/lib/prompts";
 import { rateLimit } from "@/lib/rateLimit";
 import { InterviewEvaluation } from "@/lib/types";
+import { AnswerSubmitSchema } from "@/lib/validators";
+import { apiSuccess, apiError } from "@/lib/apiResponse";
+import { sanitizeForStorage } from "@/lib/sanitize";
 
 function clampInt(n: unknown, min: number, max: number) {
   const x = typeof n === "number" ? n : Number(n);
@@ -61,9 +64,9 @@ export async function POST(
   { params }: { params: { sessionId: string } }
 ) {
   const sessionId = params.sessionId;
-  const session = getSession(sessionId);
+  const session = await getSession(sessionId);
   if (!session) {
-    return NextResponse.json({ error: "Session not found" }, { status: 404 });
+    return apiError("Session not found", "The requested session does not exist", 404);
   }
 
   // Basic rate limit by IP (best-effort)
@@ -73,30 +76,34 @@ export async function POST(
     "unknown";
   const rl = rateLimit({ key: `answer:${ip}`, limit: 30, windowMs: 60_000 });
   if (!rl.ok) {
-    return NextResponse.json(
-      { error: "Rate limit exceeded. Try again later." },
-      { status: 429 }
+    return apiError(
+      "Rate limit exceeded",
+      "Too many requests. Please try again later.",
+      429
     );
   }
 
   const body = await req.json().catch(() => null);
   if (!body) {
-    return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
+    return apiError("Invalid JSON", "Request body must be valid JSON", 400);
   }
 
-  const answerText = String(body.answerText ?? "").trim();
-  if (answerText.length < 10) {
-    return NextResponse.json(
-      { error: "Answer too short (min 10 chars)." },
-      { status: 400 }
-    );
+  const validationResult = AnswerSubmitSchema.safeParse(body);
+  if (!validationResult.success) {
+    const errors = validationResult.error.issues.map(e => `${e.path.join('.')}: ${e.message}`).join(', ');
+    return apiError("Validation failed", errors, 400);
   }
+
+  const { answerText: rawAnswerText } = validationResult.data;
+  // Sanitize answer text before storing
+  const answerText = sanitizeForStorage(rawAnswerText);
 
   const currentQuestion = session.questions[session.currentQuestionIndex];
   if (!currentQuestion) {
-    return NextResponse.json(
-      { error: "No current question. Start interview first." },
-      { status: 400 }
+    return apiError(
+      "No current question",
+      "Please start the interview first",
+      400
     );
   }
 
@@ -105,16 +112,18 @@ export async function POST(
     (e) => e.questionId === currentQuestion.id
   );
   if (alreadyEval) {
-    return NextResponse.json(
-      { error: "This question is already answered/evaluated." },
-      { status: 409 }
+    return apiError(
+      "Question already answered",
+      "This question has already been answered and evaluated",
+      409
     );
   }
 
   if (!process.env.OPENAI_API_KEY) {
-    return NextResponse.json(
-      { error: "OPENAI_API_KEY missing" },
-      { status: 500 }
+    return apiError(
+      "Configuration error",
+      "OPENAI_API_KEY is not configured",
+      500
     );
   }
 
@@ -128,6 +137,7 @@ export async function POST(
     answerText,
   });
 
+  const openai = getOpenAI();
   const resp = await openai.chat.completions.create({
     model: "gpt-4o-mini",
     temperature: 0.2,
@@ -144,9 +154,11 @@ export async function POST(
   try {
     parsed = safeJsonParse(raw);
   } catch {
-    return NextResponse.json(
-      { error: "Failed to parse model JSON", raw },
-      { status: 500 }
+    return apiError(
+      "Failed to parse model response",
+      "The AI model returned invalid JSON",
+      500,
+      { raw: raw.substring(0, 200) }
     );
   }
 
@@ -177,7 +189,7 @@ export async function POST(
   if (evaluation.gaps.length === 0)
     evaluation.gaps = ["Needs more specifics and structured detail."];
 
-  const updated = updateSession(sessionId, (s) => {
+  const updated = await updateSession(sessionId, (s) => {
     const answers = [
       ...s.answers,
       {
@@ -203,12 +215,22 @@ export async function POST(
     };
   });
 
-  return NextResponse.json({
-    ok: true,
-    evaluation,
-    scoreSummary: updated?.scoreSummary,
-    advancedToIndex: updated?.currentQuestionIndex,
-    status: updated?.status,
-  });
+  if (updated) {
+    await logAudit('answer_evaluated', 'session', sessionId, {
+      question_id: currentQuestion.id,
+      overall_score: evaluation.overall,
+    });
+  }
+
+  return apiSuccess(
+    {
+      evaluation,
+      scoreSummary: updated?.scoreSummary,
+      advancedToIndex: updated?.currentQuestionIndex,
+      status: updated?.status,
+    },
+    "Answer submitted and evaluated successfully"
+  );
 }
+
 

@@ -1,4 +1,4 @@
-export type InterviewMode = "company" | "open";
+export type InterviewMode = "company" | "college" | "individual";
 
 export type RoleLevel = "junior" | "mid" | "senior";
 
@@ -58,6 +58,48 @@ export type InterviewReport = {
   nextRoundFocus: string[]; // 4-6 bullets
 };
 
+// New: Interview configuration
+export type InterviewConfig = {
+  questionCount: 5 | 10 | 15 | 20 | 25;
+  difficultyCurve: "easy_to_hard" | "balanced" | "custom";
+  customDifficulty?: ("easy" | "medium" | "hard")[];
+};
+
+// New: Job setup structure
+export type JobSetup = {
+  jdText?: string; // Required for company mode, optional for individual
+  topSkills?: string[]; // Required for company mode, optional for individual (Max 5)
+  config: InterviewConfig;
+  resumeText?: string; // For company/individual mode
+};
+
+// New: College job template
+export type CollegeJobTemplate = {
+  id: string;
+  collegeId?: string;
+  jdText: string;
+  topSkills: string[];
+  config: InterviewConfig;
+  createdAt: number;
+  createdBy?: string;
+};
+
+// New: Candidate batch for college mode
+export type CandidateBatch = {
+  id: string;
+  jobTemplateId: string;
+  candidates: Array<{
+    email: string;
+    name: string;
+    studentId?: string;
+    sessionId?: string;
+    status?: "pending" | "in_progress" | "completed";
+    completedAt?: number;
+    linkSentAt?: number;
+  }>;
+  createdAt: number;
+};
+
 export type InterviewSession = {
   id: string;
   mode: InterviewMode;
@@ -80,5 +122,13 @@ export type InterviewSession = {
     phraseTranscript?: string;
     completedAt?: number;
   };
+  // New fields
+  jobSetup?: JobSetup;
+  collegeJobTemplateId?: string;
+  candidateEmail?: string;
+  candidateName?: string;
+  studentId?: string;
+  tabSwitchCount?: number; // For cheating detection
+  tabSwitchEvents?: Array<{ timestamp: number; type: "blur" | "focus" }>;
 };
 

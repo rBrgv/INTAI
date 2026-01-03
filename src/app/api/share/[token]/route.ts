@@ -1,17 +1,28 @@
 import { NextResponse } from "next/server";
-import { findSessionByShareToken } from "@/lib/sessionStore";
+import { findSessionByShareToken, logAudit } from "@/lib/unifiedStore";
+import { apiSuccess, apiError } from "@/lib/apiResponse";
 
 export async function GET(
   _req: Request,
   { params }: { params: { token: string } }
 ) {
-  const session = findSessionByShareToken(params.token);
+  const session = await findSessionByShareToken(params.token);
 
   if (!session || !session.report) {
-    return NextResponse.json({ error: "Report not found" }, { status: 404 });
+    return apiError(
+      "Report not found",
+      "The requested report does not exist or is not available",
+      404
+    );
   }
 
-  return NextResponse.json({
+  // Log report view
+  await logAudit('report_viewed', 'session', session.id, {
+    via: 'share_link',
+    token: params.token,
+  });
+
+  return apiSuccess({
     report: session.report,
     context: {
       mode: session.mode,
@@ -22,4 +33,5 @@ export async function GET(
     shareToken: session.shareToken,
   });
 }
+
 

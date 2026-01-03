@@ -6,12 +6,10 @@ export default async function InterviewSessionPage({
   params: { sessionId: string };
 }) {
   return (
-    <main className="mx-auto max-w-3xl p-8">
-      <h2 className="text-2xl font-semibold">Interview Session</h2>
-      <p className="mt-2 text-slate-600">
-        Generate questions and step through them. (No scoring yet.)
-      </p>
-      <InterviewClient sessionId={params.sessionId} />
+    <main className="min-h-screen bg-[var(--bg)]">
+      <div className="max-w-[1600px] mx-auto px-4 sm:px-6 lg:px-8 py-6 lg:py-8">
+        <InterviewClient sessionId={params.sessionId} />
+      </div>
     </main>
   );
 }

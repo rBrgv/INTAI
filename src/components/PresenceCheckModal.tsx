@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import Card from "./Card";
+import { clientLogger } from "@/lib/clientLogger";
 
 type PresenceCheckModalProps = {
   sessionId: string;
@@ -49,7 +50,7 @@ export default function PresenceCheckModal({
         })
         .catch((err) => {
           setCameraError("Camera access not available. You can skip this step.");
-          console.error("Camera error:", err);
+          clientLogger.error("Camera error", err instanceof Error ? err : new Error(String(err)), { sessionId });
         });
     }
 
@@ -145,7 +146,7 @@ export default function PresenceCheckModal({
         onComplete();
       }
     } catch (error) {
-      console.error("Failed to save presence:", error);
+      clientLogger.error("Failed to save presence", error instanceof Error ? error : new Error(String(error)), { sessionId });
     } finally {
       setSaving(false);
     }

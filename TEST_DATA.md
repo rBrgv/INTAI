@@ -108,3 +108,4 @@ in JavaScript/TypeScript, React, Node.js, and PostgreSQL. Experience with AWS, D
 microservices architecture. Lead technical decisions and mentor junior engineers.
 ```
 
+

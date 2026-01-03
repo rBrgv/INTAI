@@ -38,3 +38,13 @@ export function findSessionByShareToken(token: string): InterviewSession | null 
   return null;
 }
 
+export function getSessionsByIds(sessionIds: string[]): InterviewSession[] {
+  return sessionIds
+    .map(id => getSession(id))
+    .filter((s): s is InterviewSession => s !== null);
+}
+
+export function getAllSessions(): InterviewSession[] {
+  return Array.from(store.values());
+}
+

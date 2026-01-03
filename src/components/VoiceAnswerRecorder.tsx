@@ -1,6 +1,8 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { sanitizeForDisplay } from "@/lib/sanitize";
+import { logger } from "@/lib/logger";
 
 type VoiceAnswerRecorderProps = {
   onTranscript: (text: string) => void;
@@ -12,7 +14,8 @@ export default function VoiceAnswerRecorder({
   disabled = false,
 }: VoiceAnswerRecorderProps) {
   const [isRecording, setIsRecording] = useState(false);
-  const [transcript, setTranscript] = useState("");
+  const [transcript, setTranscript] = useState(""); // Persistent draft transcript (finalized text)
+  const [interimTranscript, setInterimTranscript] = useState(""); // Current interim results
   const [elapsedSec, setElapsedSec] = useState(0);
   const [isSupported, setIsSupported] = useState(true);
 
@@ -34,23 +37,31 @@ export default function VoiceAnswerRecorder({
     recognition.lang = "en-US";
 
     recognition.onresult = (event: any) => {
-      let interimTranscript = "";
-      let finalTranscript = "";
+      let newInterim = "";
+      let newFinal = "";
 
       for (let i = event.resultIndex; i < event.results.length; i++) {
         const transcript = event.results[i][0].transcript;
         if (event.results[i].isFinal) {
-          finalTranscript += transcript + " ";
+          newFinal += transcript + " ";
         } else {
-          interimTranscript += transcript;
+          newInterim += transcript;
         }
       }
 
-      setTranscript(finalTranscript + interimTranscript);
+      // Update interim transcript (live typing)
+      setInterimTranscript(newInterim);
+      
+      // Add finalized text to persistent transcript
+      if (newFinal) {
+        setTranscript((prev) => {
+          return prev ? `${prev} ${newFinal.trim()}`.trim() : newFinal.trim();
+        });
+      }
     };
 
     recognition.onerror = (event: any) => {
-      console.error("Speech recognition error:", event.error);
+      logger.error("Speech recognition error", new Error(event.error));
       if (event.error === "no-speech" || event.error === "aborted") {
         // Ignore these errors
         return;
@@ -59,6 +70,14 @@ export default function VoiceAnswerRecorder({
     };
 
     recognition.onend = () => {
+      // Keep transcript persistent - don't clear on silence
+      // Finalize any remaining interim text
+      if (interimTranscript.trim()) {
+        setTranscript((prev) => {
+          return prev ? `${prev} ${interimTranscript.trim()}`.trim() : interimTranscript.trim();
+        });
+        setInterimTranscript("");
+      }
       setIsRecording(false);
     };
 
@@ -96,8 +115,10 @@ export default function VoiceAnswerRecorder({
 
   const startRecording = () => {
     if (recognitionRef.current && !disabled) {
-      setTranscript("");
+      // Don't clear transcript - keep it persistent
+      // Only reset timer and interim transcript for new session
       setElapsedSec(0);
+      setInterimTranscript(""); // Reset interim, but keep persistent transcript
       setIsRecording(true);
       recognitionRef.current.start();
     }
@@ -107,12 +128,21 @@ export default function VoiceAnswerRecorder({
     if (recognitionRef.current) {
       recognitionRef.current.stop();
       setIsRecording(false);
+      // Finalize any remaining interim text
+      if (interimTranscript.trim()) {
+        setTranscript((prev) => {
+          return prev ? `${prev} ${interimTranscript.trim()}`.trim() : interimTranscript.trim();
+        });
+        setInterimTranscript("");
+      }
     }
   };
 
   const handleUseTranscript = () => {
-    if (transcript.trim()) {
-      onTranscript(transcript.trim());
+    const fullTranscript = transcript + (interimTranscript ? ` ${interimTranscript}` : "");
+    if (fullTranscript.trim()) {
+      onTranscript(fullTranscript.trim());
+      // Keep transcript persistent so user can edit or continue recording
     }
   };
 
@@ -155,9 +185,14 @@ export default function VoiceAnswerRecorder({
           )}
         </div>
 
-        {transcript && (
+        {(transcript || interimTranscript) && (
           <div className="mb-3 rounded-md bg-white border border-slate-200 p-3 max-h-32 overflow-y-auto">
-            <p className="text-sm text-slate-700 whitespace-pre-wrap">{transcript}</p>
+            <p className="text-sm text-slate-700 whitespace-pre-wrap">
+              {sanitizeForDisplay(transcript)}
+              {interimTranscript && (
+                <span className="text-slate-500 italic">{sanitizeForDisplay(interimTranscript)}</span>
+              )}
+            </p>
           </div>
         )}
 
@@ -179,14 +214,14 @@ export default function VoiceAnswerRecorder({
             </button>
           )}
 
-          {transcript && (
+          {(transcript || interimTranscript) && (
             <>
               <button
                 onClick={handleUseTranscript}
                 disabled={disabled}
                 className="app-btn-primary px-4 py-2 text-sm disabled:opacity-60 disabled:cursor-not-allowed"
               >
-                Use transcript
+                Confirm Answer
               </button>
               <button
                 onClick={handleClear}
