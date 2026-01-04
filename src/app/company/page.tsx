@@ -167,37 +167,59 @@ export default function CompanyPage() {
     setError(null);
     setLoading(true);
 
-    const res = await fetch("/api/sessions", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        mode: "company",
-        resumeText,
-        jdText,
-        jobSetup: {
-          jdText,
-          topSkills: topSkills.filter(s => s.trim()).slice(0, 5),
+    let response: any = {};
+    try {
+      const res = await fetch("/api/sessions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          mode: "company",
           resumeText,
-          config: {
-            questionCount,
-            difficultyCurve,
+          jdText,
+          jobSetup: {
+            jdText,
+            topSkills: topSkills.filter(s => s.trim()).slice(0, 5),
+            resumeText,
+            config: {
+              questionCount,
+              difficultyCurve,
+            },
           },
-        },
-      }),
-    });
+        }),
+      });
 
-    const response = await res.json().catch(() => ({}));
-    setLoading(false);
+      // Try to parse JSON, but handle non-JSON responses (like 405)
+      const contentType = res.headers.get("content-type");
+      if (contentType && contentType.includes("application/json")) {
+        response = await res.json().catch(() => ({}));
+      } else {
+        // For non-JSON responses, create a meaningful error
+        const text = await res.text().catch(() => "");
+        response = {
+          error: `HTTP ${res.status} ${res.statusText}`,
+          message: text || `Server returned ${res.status} ${res.statusText}`,
+        };
+      }
 
-    if (!res.ok) {
-      const errorMessage = response.error || response.message || "Failed to create session";
-      const errorDetails = response.details ? `: ${response.details}` : "";
-      setError(`${errorMessage}${errorDetails}`);
+      setLoading(false);
+
+      if (!res.ok) {
+        const errorMessage = response.error || response.message || `Failed to create session (${res.status})`;
+        const errorDetails = response.details ? `: ${response.details}` : "";
+        setError(`${errorMessage}${errorDetails}`);
+        console.error("Session creation failed:", { status: res.status, statusText: res.statusText, response });
+        return;
+      }
+    } catch (networkError) {
+      setLoading(false);
+      console.error("Network error creating session:", networkError);
+      setError("Network error. Please check your connection and try again.");
       return;
     }
 
     const sessionId = response.data?.sessionId || response.sessionId;
     if (!sessionId) {
+      console.error("No session ID in response:", response);
       setError("Failed to get session ID from server response");
       return;
     }
