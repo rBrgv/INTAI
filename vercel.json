@@ -1,0 +1,14 @@
+{
+  "functions": {
+    "src/app/api/sessions/route.ts": {
+      "runtime": "nodejs18.x"
+    }
+  },
+  "rewrites": [
+    {
+      "source": "/api/sessions",
+      "destination": "/api/sessions"
+    }
+  ]
+}
+
