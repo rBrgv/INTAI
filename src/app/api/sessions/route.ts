@@ -10,7 +10,6 @@ import { logger } from "@/lib/logger";
 // Explicitly set runtime for production compatibility
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
-export const revalidate = 0; // Disable caching
 
 // Handle CORS preflight requests
 export async function OPTIONS() {
