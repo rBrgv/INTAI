@@ -28,6 +28,15 @@ function randomId() {
   return crypto.randomUUID();
 }
 
+// Add GET handler for testing/debugging
+export async function GET() {
+  return apiSuccess(
+    { message: "Sessions API endpoint is working", methods: ["POST", "OPTIONS"] },
+    "Sessions endpoint active",
+    200
+  );
+}
+
 export async function POST(req: Request) {
   let mode: InterviewMode | undefined;
   try {
