@@ -10,6 +10,7 @@ import { logger } from "@/lib/logger";
 // Explicitly set runtime for production compatibility
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
+export const revalidate = 0; // Disable caching
 
 // Handle CORS preflight requests
 export async function OPTIONS() {
@@ -103,11 +104,18 @@ export async function POST(req: Request) {
     resume_id: resumeId || null,
   });
 
-  return apiSuccess(
+  const response = apiSuccess(
     { sessionId: session.id },
     "Session created successfully",
     201
   );
+  
+  // Ensure no caching
+  response.headers.set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+  response.headers.set('Pragma', 'no-cache');
+  response.headers.set('Expires', '0');
+  
+  return response;
   } catch (error) {
     logger.error("Error creating session", error instanceof Error ? error : new Error(String(error)), { mode: mode || 'unknown' });
     if (error instanceof Error) {
