@@ -25,11 +25,15 @@ function randomId() {
 
 // Add GET handler for testing/debugging
 export async function GET() {
-  return apiSuccess(
-    { message: "Sessions API endpoint is working", methods: ["POST", "OPTIONS"] },
-    "Sessions endpoint active",
-    200
-  );
+  try {
+    return apiSuccess(
+      { message: "Sessions API endpoint is working", methods: ["POST", "OPTIONS", "GET"] },
+      "Sessions endpoint active",
+      200
+    );
+  } catch (error) {
+    return apiError("Internal server error", error instanceof Error ? error.message : "Unknown error", 500);
+  }
 }
 
 export async function POST(req: Request) {
