@@ -262,6 +262,7 @@ export default function InterviewClient({ sessionId }: { sessionId: string }) {
     try {
       await navigator.clipboard.writeText(shareUrl);
       setCopySuccess(true);
+      addToast("Share link copied to clipboard", "success");
       setTimeout(() => setCopySuccess(false), 2000);
     } catch {
       // Fallback: select text
@@ -274,6 +275,7 @@ export default function InterviewClient({ sessionId }: { sessionId: string }) {
       try {
         document.execCommand("copy");
         setCopySuccess(true);
+        addToast("Share link copied to clipboard", "success");
         setTimeout(() => setCopySuccess(false), 2000);
       } catch {
         // Ignore
@@ -1089,7 +1091,7 @@ export default function InterviewClient({ sessionId }: { sessionId: string }) {
                             <div className="flex-1 min-w-0">
                               <p className="text-xs text-[var(--muted)] mb-1">Shareable report link</p>
                               <p className="text-xs font-mono text-[var(--text)] truncate" id="share-url">
-                                /share/{shareToken}
+                                {typeof window !== 'undefined' ? `${window.location.origin}/share/${shareToken}` : `/share/${shareToken}`}
                               </p>
                             </div>
                             <button

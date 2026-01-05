@@ -160,15 +160,35 @@ export async function updateSession(
 }
 
 export async function findSessionByShareToken(token: string): Promise<InterviewSession | null> {
+  logger.info('findSessionByShareToken called', { token, isSupabaseConfigured: isSupabaseConfigured() });
+  
   if (isSupabaseConfigured()) {
     try {
       const session = await supabaseStore.findSessionByShareToken(token);
-      if (session) return session;
+      if (session) {
+        logger.info('Session found in Supabase by share token', { token, sessionId: session.id });
+        return session;
+      }
+      logger.warn('Session not found in Supabase by share token', { token });
     } catch (error) {
-      logger.warn('Supabase findSessionByShareToken failed, falling back to memory', { error: error instanceof Error ? error.message : String(error) });
+      logger.warn('Supabase findSessionByShareToken failed, falling back to memory', { 
+        error: error instanceof Error ? error.message : String(error),
+        token 
+      });
     }
   }
-  return memoryStore.findSessionByShareToken(token);
+  
+  logger.debug('Checking memory store for share token', { token });
+  const memorySession = memoryStore.findSessionByShareToken(token);
+  if (memorySession) {
+    logger.info('Session found in memory store by share token', { token, sessionId: memorySession.id });
+  } else {
+    logger.warn('Session not found in memory store by share token', { 
+      token,
+      warning: 'Memory store may not persist across requests. Configure Supabase for persistent storage.'
+    });
+  }
+  return memorySession;
 }
 
 export async function getSessionsByIds(sessionIds: string[]): Promise<InterviewSession[]> {
@@ -284,4 +304,5 @@ export async function logAudit(
     }
   }
 }
+
 
