@@ -33,7 +33,7 @@ export async function POST(
     ? String(body.photoDataUrl).slice(0, 1_600_000) // ~1.5MB limit
     : undefined;
   const phraseTranscript = body.phraseTranscript
-    ? sanitizeForStorage(String(body.phraseTranscript).slice(0, 200))
+    ? await sanitizeForStorage(String(body.phraseTranscript).slice(0, 200))
     : undefined;
 
   const completedAt = phraseTranscript ? Date.now() : undefined;

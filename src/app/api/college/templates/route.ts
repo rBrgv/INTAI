@@ -23,10 +23,10 @@ export async function POST(req: Request) {
     );
   }
   // Sanitize JD text before storing
-  const jdText = sanitizeForStorage(rawJdText);
+  const jdText = await sanitizeForStorage(rawJdText);
 
   const topSkills = Array.isArray(body.topSkills) 
-    ? body.topSkills.map((s: any) => sanitizeForStorage(String(s).trim())).filter((s: string) => s.length > 0).slice(0, 5)
+    ? (await Promise.all(body.topSkills.map((s: any) => sanitizeForStorage(String(s).trim())))).filter((s: string) => s.length > 0).slice(0, 5)
     : [];
   
   if (topSkills.length === 0) {

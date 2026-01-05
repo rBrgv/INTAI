@@ -54,13 +54,13 @@ export async function POST(req: Request) {
     const validated = validationResult.data;
     mode = validated.mode;
     // Sanitize user inputs before storing
-    const resumeText = sanitizeForStorage(validated.resumeText);
+    const resumeText = await sanitizeForStorage(validated.resumeText);
     const resumeId = validated.resumeId;
     const jobSetup = validated.jobSetup ? {
       ...validated.jobSetup,
-      jdText: validated.jobSetup.jdText ? sanitizeForStorage(validated.jobSetup.jdText) : undefined,
-      topSkills: validated.jobSetup.topSkills ? validated.jobSetup.topSkills.map(s => sanitizeForStorage(s)) : undefined,
-      resumeText: validated.jobSetup.resumeText ? sanitizeForStorage(validated.jobSetup.resumeText) : undefined,
+      jdText: validated.jobSetup.jdText ? await sanitizeForStorage(validated.jobSetup.jdText) : undefined,
+      topSkills: validated.jobSetup.topSkills ? await Promise.all(validated.jobSetup.topSkills.map(s => sanitizeForStorage(s))) : undefined,
+      resumeText: validated.jobSetup.resumeText ? await sanitizeForStorage(validated.jobSetup.resumeText) : undefined,
     } : undefined;
 
   const session: InterviewSession = {

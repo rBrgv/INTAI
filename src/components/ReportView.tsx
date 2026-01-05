@@ -1,7 +1,7 @@
 import { ArrowRight, CheckCircle2, FileDown } from "lucide-react";
 import Card from "./Card";
 import Badge from "./Badge";
-import { sanitizeForDisplay } from "@/lib/sanitize";
+import { sanitizeForDisplaySync } from "@/lib/sanitize";
 
 type ReportViewProps = {
   report: {
@@ -154,7 +154,7 @@ export default function ReportView({
           Confidence: <span className="font-semibold">{report.confidence}%</span>
         </p>
         <p className="text-sm text-slate-700 whitespace-pre-line leading-relaxed">
-          {sanitizeForDisplay(report.executiveSummary)}
+          {sanitizeForDisplaySync(report.executiveSummary)}
         </p>
       </div>
 
@@ -223,7 +223,7 @@ export default function ReportView({
             {report.gapsAndRisks.map((g, i) => (
               <li key={i} className="flex items-start">
                 <ArrowRight className="w-3 h-3 text-yellow-600 mr-2 mt-0.5 inline" />
-                {sanitizeForDisplay(g)}
+                {sanitizeForDisplaySync(g)}
               </li>
             ))}
           </ul>
@@ -237,13 +237,13 @@ export default function ReportView({
           {report.evidence.map((e, i) => (
             <div key={i} className="rounded-md bg-slate-50 border border-slate-200 p-4">
               <div className="flex items-start justify-between mb-2">
-                <p className="text-sm font-medium text-slate-900 flex-1">{sanitizeForDisplay(e.claim)}</p>
+                <p className="text-sm font-medium text-slate-900 flex-1">{sanitizeForDisplaySync(e.claim)}</p>
                 <Badge variant="info" className="ml-2">
                   {(e.evidenceType || "technical").replace("_", " ")}
                 </Badge>
               </div>
               <p className="text-sm text-slate-600 italic mb-1">
-                "{sanitizeForDisplay(e.supportingAnswerSnippet)}"
+                "{sanitizeForDisplaySync(e.supportingAnswerSnippet)}"
               </p>
               <p className="text-xs text-slate-500">Question: {e.relatedQuestionId}</p>
             </div>
@@ -258,7 +258,7 @@ export default function ReportView({
             {report.nextRoundFocus.map((n, i) => (
               <li key={i} className="flex items-start">
                 <span className="text-blue-600 mr-2 mt-0.5">•</span>
-                {sanitizeForDisplay(n)}
+                {sanitizeForDisplaySync(n)}
               </li>
             ))}
         </ul>

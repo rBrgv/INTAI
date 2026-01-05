@@ -96,7 +96,7 @@ export async function POST(
 
   const { answerText: rawAnswerText } = validationResult.data;
   // Sanitize answer text before storing
-  const answerText = sanitizeForStorage(rawAnswerText);
+  const answerText = await sanitizeForStorage(rawAnswerText);
 
   const currentQuestion = session.questions[session.currentQuestionIndex];
   if (!currentQuestion) {

@@ -39,10 +39,10 @@ export async function POST(req: Request) {
       );
     }
     // Sanitize candidate data
-    candidate.email = sanitizeForStorage(candidate.email);
-    candidate.name = sanitizeForStorage(candidate.name);
+    candidate.email = await sanitizeForStorage(candidate.email);
+    candidate.name = await sanitizeForStorage(candidate.name);
     if (candidate.studentId) {
-      candidate.studentId = sanitizeForStorage(candidate.studentId);
+      candidate.studentId = await sanitizeForStorage(candidate.studentId);
     }
   }
 
