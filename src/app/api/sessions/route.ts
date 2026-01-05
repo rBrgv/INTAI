@@ -109,10 +109,26 @@ export async function POST(req: Request) {
   try {
     await createSession(session);
   } catch (createError) {
-    logger.error("Failed to create session", createError instanceof Error ? createError : new Error(String(createError)), { mode, sessionId: session.id });
+    const errorMessage = createError instanceof Error ? createError.message : String(createError);
+    logger.error("Failed to create session", createError instanceof Error ? createError : new Error(errorMessage), { 
+      mode, 
+      sessionId: session.id,
+      error: errorMessage
+    });
+    
+    // Provide more helpful error message
+    let userMessage = "Failed to create session";
+    if (errorMessage.includes("Supabase not configured")) {
+      userMessage = "Database not configured. Please configure Supabase to use this feature.";
+    } else if (errorMessage.includes("relation") || errorMessage.includes("table")) {
+      userMessage = "Database table not found. Please run database migrations.";
+    } else if (errorMessage.includes("permission") || errorMessage.includes("policy")) {
+      userMessage = "Database permission error. Please check Supabase configuration.";
+    }
+    
     return apiError(
-      "Failed to create session",
-      createError instanceof Error ? createError.message : "Database error occurred",
+      userMessage,
+      errorMessage,
       500
     );
   }

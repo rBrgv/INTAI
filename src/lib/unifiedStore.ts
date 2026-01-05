@@ -19,11 +19,19 @@ export async function createSession(session: InterviewSession): Promise<Intervie
     try {
       return await supabaseStore.createSession(session);
     } catch (error) {
-      logger.warn('Supabase createSession failed, falling back to memory', { error: error instanceof Error ? error.message : String(error) });
-      // Fallback to memory store
-      return memoryStore.createSession(session);
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      logger.error('Supabase createSession failed', error instanceof Error ? error : new Error(errorMessage), { 
+        sessionId: session.id, 
+        mode: session.mode,
+        error: errorMessage 
+      });
+      // In serverless environments, memory store won't persist across requests
+      // So we should re-throw the error instead of falling back
+      // This ensures the user knows there's a database issue
+      throw new Error(`Failed to create session in database: ${errorMessage}`);
     }
   }
+  // Only use memory store if Supabase is not configured
   return memoryStore.createSession(session);
 }
 
