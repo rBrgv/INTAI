@@ -87,7 +87,16 @@ export async function POST(req: Request) {
     },
   };
 
-  await createSession(session);
+  try {
+    await createSession(session);
+  } catch (createError) {
+    logger.error("Failed to create session", createError instanceof Error ? createError : new Error(String(createError)), { mode, sessionId: session.id });
+    return apiError(
+      "Failed to create session",
+      createError instanceof Error ? createError.message : "Database error occurred",
+      500
+    );
+  }
 
   // Link resume to session if resumeId provided
   if (resumeId && isSupabaseConfigured() && supabaseClient) {
@@ -96,17 +105,23 @@ export async function POST(req: Request) {
         .from("resumes")
         .update({ session_id: session.id })
         .eq("id", resumeId);
-             } catch (error) {
-               logger.warn("Failed to link resume to session", { resumeId, sessionId: session.id, error: error instanceof Error ? error.message : String(error) });
-             }
+    } catch (error) {
+      logger.warn("Failed to link resume to session", { resumeId, sessionId: session.id, error: error instanceof Error ? error.message : String(error) });
+      // Don't fail the request if resume linking fails
+    }
   }
 
-  // Log audit
-  await logAudit('session_created', 'session', session.id, {
-    mode: session.mode,
-    status: session.status,
-    resume_id: resumeId || null,
-  });
+  // Log audit (don't fail if audit logging fails)
+  try {
+    await logAudit('session_created', 'session', session.id, {
+      mode: session.mode,
+      status: session.status,
+      resume_id: resumeId || null,
+    });
+  } catch (auditError) {
+    logger.warn("Failed to log audit", { error: auditError instanceof Error ? auditError.message : String(auditError) });
+    // Don't fail the request if audit logging fails
+  }
 
   const response = apiSuccess(
     { sessionId: session.id },
