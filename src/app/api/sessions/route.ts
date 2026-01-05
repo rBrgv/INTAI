@@ -7,10 +7,6 @@ import { apiSuccess, apiError } from "@/lib/apiResponse";
 import { sanitizeForStorage } from "@/lib/sanitize";
 import { logger } from "@/lib/logger";
 
-// Explicitly set runtime for production compatibility
-export const runtime = 'nodejs';
-export const dynamic = 'force-dynamic';
-
 // Handle CORS preflight requests
 export async function OPTIONS() {
   return new NextResponse(null, {
