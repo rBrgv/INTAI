@@ -34,13 +34,23 @@ export async function getSession(id: string): Promise<InterviewSession | null> {
       if (session) {
         return session;
       }
-      // If session is null, it means not found - don't fall back to memory
+      // If not found in Supabase, check memory store as fallback
+      // This handles cases where session was created in memory due to Supabase failure
+      const memorySession = memoryStore.getSession(id);
+      if (memorySession) {
+        logger.warn('Session found in memory store but not in Supabase', { sessionId: id });
+        return memorySession;
+      }
       return null;
     } catch (error) {
-      logger.error('Supabase getSession error', error instanceof Error ? error : new Error(String(error)), { sessionId: id });
-      // Don't fall back to memory - this would cause data inconsistency
-      // If Supabase is configured, we should use it exclusively
-      throw error;
+      logger.warn('Supabase getSession error, checking memory store', { error: error instanceof Error ? error.message : String(error), sessionId: id });
+      // If Supabase fails, check memory store as fallback
+      const memorySession = memoryStore.getSession(id);
+      if (memorySession) {
+        return memorySession;
+      }
+      // If not found in either, return null
+      return null;
     }
   }
   // Only use memory store if Supabase is not configured
