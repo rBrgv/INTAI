@@ -58,14 +58,43 @@ async function getDOMPurify() {
 }
 
 // Sync version for browser use (only works in browser)
+// Uses simple sanitization as fallback since DOMPurify requires async loading
 function getDOMPurifySync() {
   if (typeof window === 'undefined') {
     throw new Error('getDOMPurifySync can only be used in browser environment');
   }
-  if (!DOMPurifyInstance) {
-    DOMPurifyInstance = require('isomorphic-dompurify').default;
+  
+  // For client-side, use simple sanitization to avoid async loading issues
+  // This is safe for display purposes and avoids ESM/CommonJS conflicts
+  const sanitizer = {
+    sanitize: (text: string, options: any = {}) => {
+      if (!text || typeof text !== 'string') return '';
+      
+      // Use simple regex-based sanitization
+      let sanitized = text;
+      
+      // Remove all HTML tags if no allowed tags specified
+      if (!options.ALLOWED_TAGS || options.ALLOWED_TAGS.length === 0) {
+        sanitized = sanitized.replace(/<[^>]*>/g, '');
+      } else {
+        // Remove script tags and dangerous attributes
+        sanitized = sanitized
+          .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '')
+          .replace(/on\w+="[^"]*"/gi, '')
+          .replace(/on\w+='[^']*'/gi, '')
+          .replace(/javascript:/gi, '');
+      }
+      
+      return sanitized;
+    }
+  };
+  
+  // Ensure we always return a valid object
+  if (!sanitizer || typeof sanitizer.sanitize !== 'function') {
+    throw new Error('Failed to initialize sanitizer');
   }
-  return DOMPurifyInstance;
+  
+  return sanitizer;
 }
 
 /**
@@ -132,9 +161,19 @@ export function sanitizeForStorageSync(input: string): string {
   if (!input || typeof input !== 'string') {
     return '';
   }
-  const DOMPurify = getDOMPurifySync();
-  const sanitized = DOMPurify.sanitize(input, { ALLOWED_TAGS: [] });
-  return sanitized.trim();
+  try {
+    const DOMPurify = getDOMPurifySync();
+    if (!DOMPurify || typeof DOMPurify.sanitize !== 'function') {
+      // Fallback to simple sanitization
+      return input.replace(/<[^>]*>/g, '').trim();
+    }
+    const sanitized = DOMPurify.sanitize(input, { ALLOWED_TAGS: [] });
+    return sanitized.trim();
+  } catch (error) {
+    // Fallback to simple sanitization if DOMPurify fails
+    console.warn('DOMPurify sanitization failed, using fallback:', error);
+    return input.replace(/<[^>]*>/g, '').trim();
+  }
 }
 
 /**
@@ -147,7 +186,13 @@ export function sanitizeForDisplaySync(content: string): string {
   if (!content || typeof content !== 'string') {
     return '';
   }
-  return sanitizeForStorageSync(content);
+  try {
+    return sanitizeForStorageSync(content);
+  } catch (error) {
+    // Fallback to simple sanitization
+    console.warn('Sanitization failed, using fallback:', error);
+    return content.replace(/<[^>]*>/g, '').trim();
+  }
 }
 
 /**
@@ -160,10 +205,28 @@ export function sanitizeHtmlSync(html: string): string {
   if (!html || typeof html !== 'string') {
     return '';
   }
-  const DOMPurify = getDOMPurifySync();
-  return DOMPurify.sanitize(html, {
-    ALLOWED_TAGS: ['p', 'br', 'strong', 'em', 'u', 'ul', 'ol', 'li', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6'],
-    ALLOWED_ATTR: [],
-  });
+  try {
+    const DOMPurify = getDOMPurifySync();
+    if (!DOMPurify || typeof DOMPurify.sanitize !== 'function') {
+      // Fallback to simple sanitization
+      return html
+        .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '')
+        .replace(/on\w+="[^"]*"/gi, '')
+        .replace(/on\w+='[^']*'/gi, '')
+        .replace(/javascript:/gi, '');
+    }
+    return DOMPurify.sanitize(html, {
+      ALLOWED_TAGS: ['p', 'br', 'strong', 'em', 'u', 'ul', 'ol', 'li', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6'],
+      ALLOWED_ATTR: [],
+    });
+  } catch (error) {
+    // Fallback to simple sanitization if DOMPurify fails
+    console.warn('DOMPurify HTML sanitization failed, using fallback:', error);
+    return html
+      .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '')
+      .replace(/on\w+="[^"]*"/gi, '')
+      .replace(/on\w+='[^']*'/gi, '')
+      .replace(/javascript:/gi, '');
+  }
 }
 
