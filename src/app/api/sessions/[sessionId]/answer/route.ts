@@ -102,8 +102,22 @@ export async function POST(
   const validationResult = AnswerSubmitSchema.safeParse(body);
   if (!validationResult.success) {
     const errors = validationResult.error.issues.map(e => `${e.path.join('.')}: ${e.message}`).join(', ');
-    logger.warn("Answer validation failed", { sessionId, errors, answerTextLength: body.answerText?.length || 0 });
-    return apiError("Validation failed", errors, 400);
+    const answerLength = body.answerText?.length || 0;
+    const trimmedLength = body.answerText?.trim().length || 0;
+    logger.warn("Answer validation failed", { 
+      sessionId, 
+      errors, 
+      answerTextLength: answerLength,
+      trimmedLength: trimmedLength
+    });
+    
+    // Provide more helpful error message
+    let errorMessage = errors;
+    if (answerLength < 10) {
+      errorMessage = `Answer must be at least 10 characters (currently ${answerLength}${trimmedLength !== answerLength ? `, ${trimmedLength} after trimming` : ''})`;
+    }
+    
+    return apiError("Validation failed", errorMessage, 400);
   }
 
   const { answerText: rawAnswerText } = validationResult.data;
@@ -111,13 +125,42 @@ export async function POST(
   // Trim and validate length again after validation
   const trimmedAnswer = rawAnswerText.trim();
   if (trimmedAnswer.length < 10) {
-    logger.warn("Answer too short after trimming", { sessionId, length: trimmedAnswer.length });
-    return apiError("Validation failed", "Answer must be at least 10 characters after trimming whitespace", 400);
+    logger.warn("Answer too short after trimming", { 
+      sessionId, 
+      originalLength: rawAnswerText.length,
+      trimmedLength: trimmedAnswer.length 
+    });
+    return apiError(
+      "Validation failed", 
+      `Answer must be at least 10 characters after trimming whitespace (currently ${trimmedAnswer.length})`, 
+      400
+    );
   }
   
   // Sanitize answer text before storing
   const answerText = await sanitizeForStorage(trimmedAnswer);
-  logger.info("Answer validated and sanitized", { sessionId, originalLength: rawAnswerText.length, sanitizedLength: answerText.length });
+  
+  // Check if sanitization removed too much content
+  if (answerText.length < 10) {
+    logger.warn("Answer too short after sanitization", { 
+      sessionId, 
+      originalLength: rawAnswerText.length,
+      trimmedLength: trimmedAnswer.length,
+      sanitizedLength: answerText.length 
+    });
+    return apiError(
+      "Validation failed", 
+      `Answer became too short after sanitization (${answerText.length} characters). Please ensure your answer is at least 10 characters and doesn't contain only HTML or special characters.`, 
+      400
+    );
+  }
+  
+  logger.info("Answer validated and sanitized", { 
+    sessionId, 
+    originalLength: rawAnswerText.length, 
+    trimmedLength: trimmedAnswer.length,
+    sanitizedLength: answerText.length 
+  });
 
   const currentQuestion = session.questions[session.currentQuestionIndex];
   if (!currentQuestion) {

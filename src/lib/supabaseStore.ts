@@ -58,9 +58,12 @@ export async function createSession(session: InterviewSession): Promise<Intervie
 
 export async function getSession(id: string): Promise<InterviewSession | null> {
   if (!isSupabaseConfigured() || !supabase) {
+    logger.warn('Supabase not configured in getSession', { sessionId: id });
     return null;
   }
 
+  logger.debug('Querying Supabase for session', { sessionId: id, table: TABLES.SESSIONS });
+  
   const { data, error } = await supabase
     .from(TABLES.SESSIONS)
     .select('*')
@@ -68,16 +71,40 @@ export async function getSession(id: string): Promise<InterviewSession | null> {
     .single();
 
   if (error) {
+    // If error code is PGRST116, the row doesn't exist (not an error)
     if (error.code === 'PGRST116') {
-      return null; // Not found
+      logger.debug('Session not found in Supabase (PGRST116)', { sessionId: id });
+      return null;
     }
-    logger.error('Error getting session from Supabase', new Error(error.message), { sessionId: id, errorCode: error.code });
-    throw error; // Throw instead of returning null so unifiedStore knows it failed
+    
+    // Log detailed error information
+    logger.error('Error fetching session from Supabase', error instanceof Error ? error : new Error(String(error)), { 
+      sessionId: id,
+      errorCode: error.code,
+      errorMessage: error.message,
+      errorDetails: error.details,
+      errorHint: error.hint,
+      table: TABLES.SESSIONS,
+      possibleCauses: [
+        error.code === '42P01' ? 'Table does not exist - run database migrations' : null,
+        error.code === '42501' ? 'Permission denied - check RLS policies' : null,
+        error.message?.includes('relation') ? 'Table not found - check migrations' : null,
+        error.message?.includes('permission') ? 'RLS policy blocking access' : null,
+      ].filter(Boolean)
+    });
+    throw error;
   }
 
   if (!data) {
+    logger.debug('No data returned from Supabase query', { sessionId: id });
     return null;
   }
+
+  logger.debug('Session data retrieved from Supabase', { 
+    sessionId: id, 
+    status: data.status,
+    hasQuestions: !!data.questions?.length
+  });
 
   return mapDbSessionToSession(data);
 }

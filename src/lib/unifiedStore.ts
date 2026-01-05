@@ -36,9 +36,14 @@ export async function createSession(session: InterviewSession): Promise<Intervie
 }
 
 export async function getSession(id: string): Promise<InterviewSession | null> {
-  logger.info('getSession called', { sessionId: id, isSupabaseConfigured: isSupabaseConfigured() });
+  const isSupabaseAvailable = isSupabaseConfigured();
+  logger.info('getSession called', { 
+    sessionId: id, 
+    isSupabaseConfigured: isSupabaseAvailable,
+    supabaseUrl: isSupabaseAvailable ? process.env.NEXT_PUBLIC_SUPABASE_URL?.substring(0, 20) + '...' : 'not set'
+  });
   
-  if (isSupabaseConfigured()) {
+  if (isSupabaseAvailable) {
     try {
       logger.debug('Attempting to get session from Supabase', { sessionId: id });
       const session = await supabaseStore.getSession(id);
@@ -46,7 +51,11 @@ export async function getSession(id: string): Promise<InterviewSession | null> {
         logger.info('Session found in Supabase', { sessionId: id, status: session.status });
         return session;
       }
-      logger.warn('Session not found in Supabase', { sessionId: id });
+      logger.warn('Session not found in Supabase', { 
+        sessionId: id,
+        table: 'interview_sessions',
+        note: 'Check if table exists and has correct permissions'
+      });
       
       // If not found in Supabase, check memory store as fallback
       // NOTE: In serverless environments, memory store won't persist across requests
@@ -54,29 +63,56 @@ export async function getSession(id: string): Promise<InterviewSession | null> {
       logger.debug('Checking memory store as fallback', { sessionId: id });
       const memorySession = memoryStore.getSession(id);
       if (memorySession) {
-        logger.warn('Session found in memory store but not in Supabase - may not persist in serverless', { sessionId: id });
+        logger.warn('Session found in memory store but not in Supabase - WILL NOT PERSIST in serverless', { 
+          sessionId: id,
+          warning: 'This session will be lost on next request. Fix Supabase configuration.'
+        });
         return memorySession;
       }
       logger.warn('Session not found in Supabase or memory store', { sessionId: id });
       return null;
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
-      logger.error('Supabase getSession error', error instanceof Error ? error : new Error(errorMessage), { sessionId: id });
+      const errorDetails = error instanceof Error ? {
+        name: error.name,
+        message: error.message,
+        stack: error.stack?.substring(0, 200)
+      } : { error: String(error) };
+      
+      logger.error('Supabase getSession error', error instanceof Error ? error : new Error(errorMessage), { 
+        sessionId: id,
+        errorDetails,
+        possibleCauses: [
+          'Table does not exist - run migrations',
+          'RLS policies blocking access',
+          'Invalid credentials',
+          'Network connectivity issue'
+        ]
+      });
       
       // If Supabase fails, check memory store as fallback
       logger.debug('Checking memory store after Supabase error', { sessionId: id });
       const memorySession = memoryStore.getSession(id);
       if (memorySession) {
-        logger.warn('Session found in memory store after Supabase error - may not persist in serverless', { sessionId: id });
+        logger.warn('Session found in memory store after Supabase error - WILL NOT PERSIST in serverless', { 
+          sessionId: id,
+          warning: 'This session will be lost on next request. Fix Supabase error: ' + errorMessage
+        });
         return memorySession;
       }
-      logger.warn('Session not found after Supabase error and memory check', { sessionId: id });
+      logger.warn('Session not found after Supabase error and memory check', { 
+        sessionId: id,
+        error: errorMessage
+      });
       return null;
     }
   }
   
   // Only use memory store if Supabase is not configured
-  logger.debug('Supabase not configured, using memory store', { sessionId: id });
+  logger.debug('Supabase not configured, using memory store', { 
+    sessionId: id,
+    warning: 'Memory store will not persist in serverless environment'
+  });
   const memorySession = memoryStore.getSession(id);
   if (memorySession) {
     logger.info('Session found in memory store', { sessionId: id });
