@@ -409,6 +409,15 @@ export default function InterviewClient({ sessionId }: { sessionId: string }) {
 
   async function submitAnswer() {
     setError(null);
+    
+    // Client-side validation
+    if (!answerText || answerText.trim().length < 10) {
+      const errorMsg = "Answer must be at least 10 characters";
+      setError(errorMsg);
+      addToast(errorMsg, "error");
+      return;
+    }
+    
     setLoading(true);
     setIsTyping(true);
 
@@ -418,32 +427,52 @@ export default function InterviewClient({ sessionId }: { sessionId: string }) {
       localStorage.removeItem(draftKey);
     }
 
-    const res = await fetch(`/api/sessions/${sessionId}/answer`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ answerText }),
-    });
+    try {
+      const res = await fetch(`/api/sessions/${sessionId}/answer`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ answerText: answerText.trim() }),
+      });
 
-    const json = (await res.json().catch(() => ({}))) as Partial<EvalResp> & {
-      error?: string;
-    };
-    setLoading(false);
+      const json = (await res.json().catch(() => ({}))) as Partial<EvalResp> & {
+        error?: string;
+        message?: string;
+        details?: string;
+        data?: any;
+      };
+      setLoading(false);
 
-    if (!res.ok) {
-      const errorMsg = json.error || "Failed to submit answer";
+      if (!res.ok) {
+        // Extract error message from standardized API response
+        const errorMsg = json.error || json.message || json.details || `Failed to submit answer (${res.status})`;
+        setError(errorMsg);
+        addToast(errorMsg, "error");
+        setIsTyping(false);
+        clientLogger.error("Answer submission failed", new Error(errorMsg), { 
+          sessionId, 
+          status: res.status,
+          response: json 
+        });
+        return;
+      }
+
+      // Handle standardized API response format
+      const responseData = (json as any).data || json;
+      setLastEval(responseData as EvalResp);
+      setAnswerText("");
+      setShowConfirmDialog(false);
+      addToast("Answer submitted and evaluated", "success");
+      await refresh();
+      // Small delay to show typing indicator for next question
+      setTimeout(() => setIsTyping(false), 500);
+    } catch (error) {
+      setLoading(false);
+      setIsTyping(false);
+      const errorMsg = error instanceof Error ? error.message : "Network error submitting answer";
       setError(errorMsg);
       addToast(errorMsg, "error");
-      setIsTyping(false);
-      return;
+      clientLogger.error("Network error submitting answer", error instanceof Error ? error : new Error(String(error)), { sessionId });
     }
-
-    setLastEval(json as EvalResp);
-    setAnswerText("");
-    setShowConfirmDialog(false);
-    addToast("Answer submitted and evaluated", "success");
-    await refresh();
-    // Small delay to show typing indicator for next question
-    setTimeout(() => setIsTyping(false), 500);
   }
 
   const handleSubmitClick = () => {

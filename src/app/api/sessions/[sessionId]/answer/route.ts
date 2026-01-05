@@ -7,6 +7,7 @@ import { InterviewEvaluation } from "@/lib/types";
 import { AnswerSubmitSchema } from "@/lib/validators";
 import { apiSuccess, apiError } from "@/lib/apiResponse";
 import { sanitizeForStorage } from "@/lib/sanitize";
+import { logger } from "@/lib/logger";
 
 function clampInt(n: unknown, min: number, max: number) {
   const x = typeof n === "number" ? n : Number(n);
@@ -64,8 +65,11 @@ export async function POST(
   { params }: { params: { sessionId: string } }
 ) {
   const sessionId = params.sessionId;
+  logger.info("Answer submission request received", { sessionId });
+  
   const session = await getSession(sessionId);
   if (!session) {
+    logger.warn("Session not found for answer submission", { sessionId });
     return apiError("Session not found", "The requested session does not exist", 404);
   }
 
@@ -85,18 +89,35 @@ export async function POST(
 
   const body = await req.json().catch(() => null);
   if (!body) {
+    logger.warn("Invalid JSON in answer submission", { sessionId });
     return apiError("Invalid JSON", "Request body must be valid JSON", 400);
   }
+
+  logger.debug("Answer submission body received", { 
+    sessionId, 
+    hasAnswerText: !!body.answerText,
+    answerTextLength: body.answerText?.length || 0
+  });
 
   const validationResult = AnswerSubmitSchema.safeParse(body);
   if (!validationResult.success) {
     const errors = validationResult.error.issues.map(e => `${e.path.join('.')}: ${e.message}`).join(', ');
+    logger.warn("Answer validation failed", { sessionId, errors, answerTextLength: body.answerText?.length || 0 });
     return apiError("Validation failed", errors, 400);
   }
 
   const { answerText: rawAnswerText } = validationResult.data;
+  
+  // Trim and validate length again after validation
+  const trimmedAnswer = rawAnswerText.trim();
+  if (trimmedAnswer.length < 10) {
+    logger.warn("Answer too short after trimming", { sessionId, length: trimmedAnswer.length });
+    return apiError("Validation failed", "Answer must be at least 10 characters after trimming whitespace", 400);
+  }
+  
   // Sanitize answer text before storing
-  const answerText = await sanitizeForStorage(rawAnswerText);
+  const answerText = await sanitizeForStorage(trimmedAnswer);
+  logger.info("Answer validated and sanitized", { sessionId, originalLength: rawAnswerText.length, sanitizedLength: answerText.length });
 
   const currentQuestion = session.questions[session.currentQuestionIndex];
   if (!currentQuestion) {
