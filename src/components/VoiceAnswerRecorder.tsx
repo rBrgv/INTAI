@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { sanitizeForDisplaySync } from "@/lib/sanitize";
 import { logger } from "@/lib/logger";
 
 type VoiceAnswerRecorderProps = {
@@ -188,9 +187,9 @@ export default function VoiceAnswerRecorder({
         {(transcript || interimTranscript) && (
           <div className="mb-3 rounded-md bg-white border border-slate-200 p-3 max-h-32 overflow-y-auto">
             <p className="text-sm text-slate-700 whitespace-pre-wrap">
-              {sanitizeForDisplaySync(transcript)}
+              {transcript}
               {interimTranscript && (
-                <span className="text-slate-500 italic">{sanitizeForDisplaySync(interimTranscript)}</span>
+                <span className="text-slate-500 italic">{interimTranscript}</span>
               )}
             </p>
           </div>
