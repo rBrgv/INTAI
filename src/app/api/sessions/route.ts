@@ -53,15 +53,30 @@ export async function POST(req: Request) {
 
     const validated = validationResult.data;
     mode = validated.mode;
-    // Sanitize user inputs before storing
-    const resumeText = await sanitizeForStorage(validated.resumeText);
+    // Sanitize user inputs before storing (with error handling)
+    let resumeText: string;
+    try {
+      resumeText = await sanitizeForStorage(validated.resumeText);
+    } catch (sanitizeError) {
+      logger.warn("Sanitization failed, using raw text", { error: sanitizeError instanceof Error ? sanitizeError.message : String(sanitizeError) });
+      resumeText = String(validated.resumeText || '').trim();
+    }
+    
     const resumeId = validated.resumeId;
-    const jobSetup = validated.jobSetup ? {
-      ...validated.jobSetup,
-      jdText: validated.jobSetup.jdText ? await sanitizeForStorage(validated.jobSetup.jdText) : undefined,
-      topSkills: validated.jobSetup.topSkills ? await Promise.all(validated.jobSetup.topSkills.map(s => sanitizeForStorage(s))) : undefined,
-      resumeText: validated.jobSetup.resumeText ? await sanitizeForStorage(validated.jobSetup.resumeText) : undefined,
-    } : undefined;
+    let jobSetup: any = undefined;
+    if (validated.jobSetup) {
+      try {
+        jobSetup = {
+          ...validated.jobSetup,
+          jdText: validated.jobSetup.jdText ? await sanitizeForStorage(validated.jobSetup.jdText) : undefined,
+          topSkills: validated.jobSetup.topSkills ? await Promise.all(validated.jobSetup.topSkills.map(s => sanitizeForStorage(s))) : undefined,
+          resumeText: validated.jobSetup.resumeText ? await sanitizeForStorage(validated.jobSetup.resumeText) : undefined,
+        };
+      } catch (sanitizeError) {
+        logger.warn("Job setup sanitization failed, using raw values", { error: sanitizeError instanceof Error ? sanitizeError.message : String(sanitizeError) });
+        jobSetup = validated.jobSetup;
+      }
+    }
 
   const session: InterviewSession = {
     id: randomId(),

@@ -8,21 +8,51 @@
 // Lazy load DOMPurify to avoid ESM/CommonJS conflicts in serverless environments
 let DOMPurifyInstance: any = null;
 
+// Simple regex-based sanitization for server-side (avoids ESM/CommonJS conflicts)
+function simpleSanitize(text: string, allowedTags: string[] = []): string {
+  if (!text || typeof text !== 'string') {
+    return '';
+  }
+  
+  // Remove all HTML tags if no allowed tags specified
+  if (allowedTags.length === 0) {
+    return text.replace(/<[^>]*>/g, '').trim();
+  }
+  
+  // For allowed tags, we'll just strip script tags and dangerous attributes
+  // This is a simplified version - for full sanitization, use DOMPurify in browser
+  let sanitized = text
+    .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '')
+    .replace(/on\w+="[^"]*"/gi, '')
+    .replace(/on\w+='[^']*'/gi, '')
+    .replace(/javascript:/gi, '');
+  
+  return sanitized.trim();
+}
+
 async function getDOMPurify() {
-  if (!DOMPurifyInstance) {
-    // In browser, try to load synchronously first (works fine there)
-    if (typeof window !== 'undefined') {
-      try {
-        const DOMPurify = require('isomorphic-dompurify').default;
-        DOMPurifyInstance = DOMPurify;
-        return DOMPurifyInstance;
-      } catch {
-        // Fall through to async import
+  // In serverless environments, don't use DOMPurify - use simple sanitization
+  if (typeof window === 'undefined') {
+    return {
+      sanitize: (text: string, options: any = {}) => {
+        return simpleSanitize(text, options.ALLOWED_TAGS || []);
       }
+    };
+  }
+  
+  // In browser, use DOMPurify
+  if (!DOMPurifyInstance) {
+    try {
+      const DOMPurify = (await import('isomorphic-dompurify')).default;
+      DOMPurifyInstance = DOMPurify;
+    } catch (error) {
+      // Fallback to simple sanitization
+      return {
+        sanitize: (text: string, options: any = {}) => {
+          return simpleSanitize(text, options.ALLOWED_TAGS || []);
+        }
+      };
     }
-    // In serverless/server, use dynamic import
-    const DOMPurify = (await import('isomorphic-dompurify')).default;
-    DOMPurifyInstance = DOMPurify;
   }
   return DOMPurifyInstance;
 }
