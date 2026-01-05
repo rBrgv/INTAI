@@ -10,9 +10,14 @@ export async function POST(
   _req: Request,
   { params }: { params: { sessionId: string } }
 ) {
+  const sessionId = params.sessionId;
+  logger.info("Start interview request received", { sessionId });
+  
   try {
-    const existing = await getSession(params.sessionId);
+    const existing = await getSession(sessionId);
+    logger.debug("Session retrieved", { sessionId, status: existing?.status, hasQuestions: !!existing?.questions?.length });
     if (!existing) {
+      logger.warn("Session not found", { sessionId });
       return apiError("Session not found", "The requested session does not exist", 404);
     }
 
@@ -26,6 +31,7 @@ export async function POST(
 
     // If already started and has questions, return success
     if (existing.questions && existing.questions.length > 0) {
+      logger.info("Interview already started", { sessionId, questionCount: existing.questions.length });
       const response = apiSuccess(
         { 
           alreadyStarted: true,
@@ -41,6 +47,7 @@ export async function POST(
 
     // Validate required fields
     if (!existing.resumeText || existing.resumeText.length < 50) {
+      logger.warn("Resume text validation failed", { sessionId, resumeLength: existing.resumeText?.length || 0 });
       return apiError(
         "Validation failed",
         "Resume text is required and must be at least 50 characters",
@@ -51,6 +58,8 @@ export async function POST(
     // Get question count from jobSetup config if available
     const questionCount = existing.jobSetup?.config?.questionCount || 8;
     const jdText = existing.jdText || existing.jobSetup?.jdText;
+
+    logger.info("Generating interview questions", { sessionId, questionCount, mode: existing.mode, hasJdText: !!jdText });
 
     // Generate questions
     const prompt = buildQuestionGenPrompt({
@@ -113,8 +122,10 @@ export async function POST(
       difficulty: q.difficulty || "medium",
     }));
 
+    logger.info("Questions generated successfully", { sessionId, questionCount: questions.length });
+
     // Update session with questions
-    const updated = await updateSession(params.sessionId, (s) => ({
+    const updated = await updateSession(sessionId, (s) => ({
       ...s,
       status: "in_progress",
       questions: questions,
@@ -138,9 +149,11 @@ export async function POST(
       );
     }
 
-    await logAudit('interview_started', 'session', params.sessionId, {
+    await logAudit('interview_started', 'session', sessionId, {
       question_count: questions.length,
     });
+
+    logger.info("Interview started successfully", { sessionId, questionCount: questions.length });
 
     const response = apiSuccess(
       { 
@@ -157,7 +170,7 @@ export async function POST(
 
     return response;
   } catch (error) {
-    logger.error("Error in start route", error instanceof Error ? error : new Error(String(error)), { sessionId: params.sessionId });
+    logger.error("Error in start route", error instanceof Error ? error : new Error(String(error)), { sessionId });
     return apiError(
       "Internal server error",
       error instanceof Error ? error.message : "An unexpected error occurred",

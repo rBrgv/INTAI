@@ -35,9 +35,9 @@ class Logger {
   }
 
   private shouldLog(level: LogLevel): boolean {
-    // In production, only log errors and warnings
+    // In production, log errors, warnings, and info (for debugging API routes)
     if (!this.isDevelopment) {
-      return level === 'error' || level === 'warn';
+      return level === 'error' || level === 'warn' || level === 'info';
     }
     // In development, log everything
     return true;
