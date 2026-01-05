@@ -122,43 +122,22 @@ export async function POST(
 
   const { answerText: rawAnswerText } = validationResult.data;
   
-  // Trim and validate length again after validation
-  const trimmedAnswer = rawAnswerText.trim();
-  if (trimmedAnswer.length < 10) {
-    logger.warn("Answer too short after trimming", { 
-      sessionId, 
-      originalLength: rawAnswerText.length,
-      trimmedLength: trimmedAnswer.length 
-    });
-    return apiError(
-      "Validation failed", 
-      `Answer must be at least 10 characters after trimming whitespace (currently ${trimmedAnswer.length})`, 
-      400
-    );
-  }
-  
   // Sanitize answer text before storing
-  const answerText = await sanitizeForStorage(trimmedAnswer);
-  
-  // Check if sanitization removed too much content
-  if (answerText.length < 10) {
-    logger.warn("Answer too short after sanitization", { 
-      sessionId, 
-      originalLength: rawAnswerText.length,
-      trimmedLength: trimmedAnswer.length,
-      sanitizedLength: answerText.length 
+  let answerText: string;
+  try {
+    answerText = await sanitizeForStorage(rawAnswerText);
+  } catch (sanitizeError) {
+    logger.warn("Sanitization failed, using trimmed text", { 
+      sessionId,
+      error: sanitizeError instanceof Error ? sanitizeError.message : String(sanitizeError)
     });
-    return apiError(
-      "Validation failed", 
-      `Answer became too short after sanitization (${answerText.length} characters). Please ensure your answer is at least 10 characters and doesn't contain only HTML or special characters.`, 
-      400
-    );
+    // Fallback to just trimming if sanitization fails
+    answerText = rawAnswerText.trim();
   }
   
   logger.info("Answer validated and sanitized", { 
     sessionId, 
     originalLength: rawAnswerText.length, 
-    trimmedLength: trimmedAnswer.length,
     sanitizedLength: answerText.length 
   });
 

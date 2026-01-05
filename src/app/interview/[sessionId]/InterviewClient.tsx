@@ -410,17 +410,9 @@ export default function InterviewClient({ sessionId }: { sessionId: string }) {
   async function submitAnswer() {
     setError(null);
     
-    // Client-side validation
-    const trimmedAnswer = answerText?.trim() || "";
-    if (!trimmedAnswer) {
+    // Basic client-side validation
+    if (!answerText || !answerText.trim()) {
       const errorMsg = "Please enter an answer before submitting";
-      setError(errorMsg);
-      addToast(errorMsg, "error");
-      return;
-    }
-    
-    if (trimmedAnswer.length < 10) {
-      const errorMsg = `Answer must be at least 10 characters (currently ${trimmedAnswer.length})`;
       setError(errorMsg);
       addToast(errorMsg, "error");
       return;

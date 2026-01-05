@@ -70,13 +70,15 @@ export default function VoiceAnswerRecorder({
 
     recognition.onend = () => {
       // Keep transcript persistent - don't clear on silence
-      // Finalize any remaining interim text
-      if (interimTranscript.trim()) {
-        setTranscript((prev) => {
-          return prev ? `${prev} ${interimTranscript.trim()}`.trim() : interimTranscript.trim();
-        });
-        setInterimTranscript("");
-      }
+      // Finalize any remaining interim text using state updater function
+      setInterimTranscript((currentInterim) => {
+        if (currentInterim.trim()) {
+          setTranscript((prev) => {
+            return prev ? `${prev} ${currentInterim.trim()}`.trim() : currentInterim.trim();
+          });
+        }
+        return "";
+      });
       setIsRecording(false);
     };
 
@@ -127,13 +129,15 @@ export default function VoiceAnswerRecorder({
     if (recognitionRef.current) {
       recognitionRef.current.stop();
       setIsRecording(false);
-      // Finalize any remaining interim text
-      if (interimTranscript.trim()) {
-        setTranscript((prev) => {
-          return prev ? `${prev} ${interimTranscript.trim()}`.trim() : interimTranscript.trim();
-        });
-        setInterimTranscript("");
-      }
+      // Finalize any remaining interim text using state updater
+      setInterimTranscript((currentInterim) => {
+        if (currentInterim.trim()) {
+          setTranscript((prev) => {
+            return prev ? `${prev} ${currentInterim.trim()}`.trim() : currentInterim.trim();
+          });
+        }
+        return "";
+      });
     }
   };
 
