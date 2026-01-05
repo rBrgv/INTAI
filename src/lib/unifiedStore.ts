@@ -15,9 +15,17 @@ import { logger } from './logger';
 // ============================================
 
 export async function createSession(session: InterviewSession): Promise<InterviewSession> {
+  logger.info('createSession called', { 
+    sessionId: session.id, 
+    mode: session.mode,
+    isSupabaseConfigured: isSupabaseConfigured() 
+  });
+  
   if (isSupabaseConfigured()) {
     try {
-      return await supabaseStore.createSession(session);
+      const created = await supabaseStore.createSession(session);
+      logger.info('Session created in Supabase', { sessionId: session.id });
+      return created;
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
       logger.error('Supabase createSession failed', error instanceof Error ? error : new Error(errorMessage), { 
@@ -32,7 +40,13 @@ export async function createSession(session: InterviewSession): Promise<Intervie
     }
   }
   // Only use memory store if Supabase is not configured
-  return memoryStore.createSession(session);
+  logger.info('Creating session in memory store', { sessionId: session.id });
+  const created = memoryStore.createSession(session);
+  logger.info('Session created in memory store', { 
+    sessionId: session.id,
+    storeSize: (globalThis as any).__SESSION_STORE__?.size || 0
+  });
+  return created;
 }
 
 export async function getSession(id: string): Promise<InterviewSession | null> {
