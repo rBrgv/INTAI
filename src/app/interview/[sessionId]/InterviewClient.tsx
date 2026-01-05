@@ -140,6 +140,7 @@ export default function InterviewClient({ sessionId }: { sessionId: string }) {
   const [interviewStartTime, setInterviewStartTime] = useState<number | null>(null);
   const [timeElapsed, setTimeElapsed] = useState(0);
   const [toasts, setToasts] = useState<Array<{ id: string; message: string; type?: ToastType }>>([]);
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   // Auto-save draft answer to localStorage
   useEffect(() => {
@@ -310,8 +311,6 @@ export default function InterviewClient({ sessionId }: { sessionId: string }) {
         return;
       }
       
-      addToast("Interview started successfully", "success");
-      
       // Wait a bit for database to update, then refresh
       await new Promise(resolve => setTimeout(resolve, 1000));
       await refresh();
@@ -354,7 +353,6 @@ export default function InterviewClient({ sessionId }: { sessionId: string }) {
       return;
     }
     await refresh();
-    addToast("Moved to previous question", "info");
     setTimeout(() => setIsTyping(false), 500);
   }
 
@@ -399,7 +397,6 @@ export default function InterviewClient({ sessionId }: { sessionId: string }) {
         }
       }
       await refresh();
-      addToast(`Jumped to question ${targetIndex + 1}`, "info");
     } catch (error) {
       addToast("Failed to jump to question", "error");
     } finally {
@@ -408,6 +405,11 @@ export default function InterviewClient({ sessionId }: { sessionId: string }) {
   }
 
   async function submitAnswer() {
+    // Prevent double submission
+    if (isSubmitting) {
+      return;
+    }
+    
     setError(null);
     
     // Basic client-side validation
@@ -418,6 +420,7 @@ export default function InterviewClient({ sessionId }: { sessionId: string }) {
       return;
     }
     
+    setIsSubmitting(true);
     setLoading(true);
     setIsTyping(true);
 
@@ -440,7 +443,6 @@ export default function InterviewClient({ sessionId }: { sessionId: string }) {
         details?: string;
         data?: any;
       };
-      setLoading(false);
 
       if (!res.ok) {
         // Extract error message from standardized API response
@@ -448,6 +450,8 @@ export default function InterviewClient({ sessionId }: { sessionId: string }) {
         setError(errorMsg);
         addToast(errorMsg, "error");
         setIsTyping(false);
+        setLoading(false);
+        setIsSubmitting(false);
         clientLogger.error("Answer submission failed", new Error(errorMsg), { 
           sessionId, 
           status: res.status,
@@ -461,13 +465,17 @@ export default function InterviewClient({ sessionId }: { sessionId: string }) {
       setLastEval(responseData as EvalResp);
       setAnswerText("");
       setShowConfirmDialog(false);
-      addToast("Answer submitted and evaluated", "success");
       await refresh();
       // Small delay to show typing indicator for next question
-      setTimeout(() => setIsTyping(false), 500);
+      setTimeout(() => {
+        setIsTyping(false);
+        setLoading(false);
+        setIsSubmitting(false);
+      }, 500);
     } catch (error) {
-      setLoading(false);
       setIsTyping(false);
+      setLoading(false);
+      setIsSubmitting(false);
       const errorMsg = error instanceof Error ? error.message : "Network error submitting answer";
       setError(errorMsg);
       addToast(errorMsg, "error");
@@ -513,7 +521,7 @@ export default function InterviewClient({ sessionId }: { sessionId: string }) {
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       // Enter to submit (with Ctrl/Cmd to avoid accidental submits)
-      if ((e.ctrlKey || e.metaKey) && e.key === 'Enter' && !loading && !completed && answerText.trim()) {
+      if ((e.ctrlKey || e.metaKey) && e.key === 'Enter' && !isSubmitting && !loading && !completed && answerText.trim()) {
         e.preventDefault();
         handleSubmitClick();
       }
@@ -526,7 +534,7 @@ export default function InterviewClient({ sessionId }: { sessionId: string }) {
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [loading, completed, answerText, showConfirmDialog, handleSubmitClick]);
+  }, [isSubmitting, loading, completed, answerText, showConfirmDialog, handleSubmitClick]);
 
   // Show presence modal on first load if not dismissed
   useEffect(() => {
@@ -660,9 +668,10 @@ export default function InterviewClient({ sessionId }: { sessionId: string }) {
               </button>
               <button
                 onClick={submitAnswer}
-                className="app-btn-primary px-4 py-2 text-sm"
+                disabled={isSubmitting || loading}
+                className="app-btn-primary px-4 py-2 text-sm disabled:opacity-60 disabled:cursor-not-allowed"
               >
-                Submit Answer
+                {isSubmitting || loading ? "Submitting..." : "Submit Answer"}
               </button>
             </div>
           </Card>
@@ -951,10 +960,10 @@ export default function InterviewClient({ sessionId }: { sessionId: string }) {
                   <div className="mt-6 flex items-center gap-3">
                     <button
                       onClick={handleSubmitClick}
-                      disabled={loading || completed || !answerText.trim()}
+                      disabled={isSubmitting || loading || completed || !answerText.trim()}
                       className="app-btn-primary px-6 py-3 disabled:opacity-60 disabled:cursor-not-allowed flex-1"
                     >
-                      {loading ? "Submitting..." : "Submit Answer"}
+                      {isSubmitting || loading ? "Submitting..." : "Submit Answer"}
                     </button>
                     {loading && <Skeleton className="h-10 w-24" />}
                   </div>
