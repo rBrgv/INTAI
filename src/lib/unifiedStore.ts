@@ -36,33 +36,54 @@ export async function createSession(session: InterviewSession): Promise<Intervie
 }
 
 export async function getSession(id: string): Promise<InterviewSession | null> {
+  logger.info('getSession called', { sessionId: id, isSupabaseConfigured: isSupabaseConfigured() });
+  
   if (isSupabaseConfigured()) {
     try {
+      logger.debug('Attempting to get session from Supabase', { sessionId: id });
       const session = await supabaseStore.getSession(id);
       if (session) {
+        logger.info('Session found in Supabase', { sessionId: id, status: session.status });
         return session;
       }
+      logger.warn('Session not found in Supabase', { sessionId: id });
+      
       // If not found in Supabase, check memory store as fallback
-      // This handles cases where session was created in memory due to Supabase failure
+      // NOTE: In serverless environments, memory store won't persist across requests
+      // This is only useful if both requests happen in the same function instance
+      logger.debug('Checking memory store as fallback', { sessionId: id });
       const memorySession = memoryStore.getSession(id);
       if (memorySession) {
-        logger.warn('Session found in memory store but not in Supabase', { sessionId: id });
+        logger.warn('Session found in memory store but not in Supabase - may not persist in serverless', { sessionId: id });
         return memorySession;
       }
+      logger.warn('Session not found in Supabase or memory store', { sessionId: id });
       return null;
     } catch (error) {
-      logger.warn('Supabase getSession error, checking memory store', { error: error instanceof Error ? error.message : String(error), sessionId: id });
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      logger.error('Supabase getSession error', error instanceof Error ? error : new Error(errorMessage), { sessionId: id });
+      
       // If Supabase fails, check memory store as fallback
+      logger.debug('Checking memory store after Supabase error', { sessionId: id });
       const memorySession = memoryStore.getSession(id);
       if (memorySession) {
+        logger.warn('Session found in memory store after Supabase error - may not persist in serverless', { sessionId: id });
         return memorySession;
       }
-      // If not found in either, return null
+      logger.warn('Session not found after Supabase error and memory check', { sessionId: id });
       return null;
     }
   }
+  
   // Only use memory store if Supabase is not configured
-  return memoryStore.getSession(id);
+  logger.debug('Supabase not configured, using memory store', { sessionId: id });
+  const memorySession = memoryStore.getSession(id);
+  if (memorySession) {
+    logger.info('Session found in memory store', { sessionId: id });
+  } else {
+    logger.warn('Session not found in memory store', { sessionId: id });
+  }
+  return memorySession;
 }
 
 export async function updateSession(
