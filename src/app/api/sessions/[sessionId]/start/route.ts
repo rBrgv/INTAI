@@ -17,8 +17,19 @@ export async function POST(
     const existing = await getSession(sessionId);
     logger.debug("Session retrieved", { sessionId, status: existing?.status, hasQuestions: !!existing?.questions?.length });
     if (!existing) {
-      logger.warn("Session not found", { sessionId });
-      return apiError("Session not found", "The requested session does not exist", 404);
+      logger.warn("Session not found", { sessionId, isSupabaseConfigured: process.env.NEXT_PUBLIC_SUPABASE_URL ? true : false });
+      
+      // Provide helpful error message if Supabase is not configured
+      const isSupabaseConfigured = process.env.NEXT_PUBLIC_SUPABASE_URL && process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+      if (!isSupabaseConfigured) {
+        return apiError(
+          "Database not configured",
+          "Supabase is required for production use. Sessions cannot persist in serverless environments without a database. Please configure NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY environment variables.",
+          503
+        );
+      }
+      
+      return apiError("Session not found", "The requested session does not exist. It may have expired or been deleted.", 404);
     }
 
     if (!process.env.OPENAI_API_KEY) {

@@ -113,12 +113,20 @@ export async function POST(req: Request) {
     logger.error("Failed to create session", createError instanceof Error ? createError : new Error(errorMessage), { 
       mode, 
       sessionId: session.id,
-      error: errorMessage
+      error: errorMessage,
+      isSupabaseConfigured: isSupabaseConfigured()
     });
     
     // Provide more helpful error message
     let userMessage = "Failed to create session";
-    if (errorMessage.includes("Supabase not configured")) {
+    let statusCode = 500;
+    
+    if (!isSupabaseConfigured()) {
+      userMessage = "Database not configured";
+      const detailedMessage = "Supabase is required for production use. Sessions cannot persist in serverless environments without a database. Please configure NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY environment variables in your Vercel project settings.";
+      statusCode = 503; // Service Unavailable
+      return apiError(userMessage, detailedMessage, statusCode);
+    } else if (errorMessage.includes("Supabase not configured")) {
       userMessage = "Database not configured. Please configure Supabase to use this feature.";
     } else if (errorMessage.includes("relation") || errorMessage.includes("table")) {
       userMessage = "Database table not found. Please run database migrations.";
@@ -129,7 +137,7 @@ export async function POST(req: Request) {
     return apiError(
       userMessage,
       errorMessage,
-      500
+      statusCode
     );
   }
 
