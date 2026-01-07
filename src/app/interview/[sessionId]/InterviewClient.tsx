@@ -319,25 +319,26 @@ export default function InterviewClient({ sessionId }: { sessionId: string }) {
     setLoading(true);
     setIsTyping(true);
     
-    // Enter fullscreen mode when interview begins
+    // Enter fullscreen mode when interview begins (non-blocking)
     try {
       if (document.documentElement.requestFullscreen) {
-        await document.documentElement.requestFullscreen();
+        await document.documentElement.requestFullscreen().catch(() => {});
       } else if ((document.documentElement as any).webkitRequestFullscreen) {
-        await (document.documentElement as any).webkitRequestFullscreen();
+        await (document.documentElement as any).webkitRequestFullscreen().catch(() => {});
       } else if ((document.documentElement as any).mozRequestFullScreen) {
-        await (document.documentElement as any).mozRequestFullScreen();
+        await (document.documentElement as any).mozRequestFullScreen().catch(() => {});
       } else if ((document.documentElement as any).msRequestFullscreen) {
-        await (document.documentElement as any).msRequestFullscreen();
+        await (document.documentElement as any).msRequestFullscreen().catch(() => {});
       }
       setFullScreenMode(true);
     } catch (error) {
-      // Fullscreen request failed (user may have denied permission)
+      // Fullscreen request failed (user may have denied permission) - non-blocking
       clientLogger.warn("Could not enter fullscreen", { error: error instanceof Error ? error.message : String(error) });
     }
     
     try {
-      clientLogger.info("Making POST request to start interview", { sessionId, url: `/api/sessions/${sessionId}/start` });
+      const startUrl = `/api/sessions/${sessionId}/start`;
+      clientLogger.info("Making POST request to start interview", { sessionId, url: startUrl });
       const result = await retryWithBackoff(
         async () => {
           const res = await fetch(`/api/sessions/${sessionId}/start`, {
