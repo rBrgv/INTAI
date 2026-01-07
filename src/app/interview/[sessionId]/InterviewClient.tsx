@@ -1183,7 +1183,7 @@ export default function InterviewClient({ sessionId }: { sessionId: string }) {
                               if (isSpeaking) {
                                 window.speechSynthesis.cancel();
                                 setIsSpeaking(false);
-                              } else {
+                              } else if (data.currentQuestion) {
                                 const utterance = new SpeechSynthesisUtterance(data.currentQuestion.text);
                                 utterance.rate = 0.9;
                                 utterance.pitch = 1;
