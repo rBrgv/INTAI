@@ -335,15 +335,16 @@ export default function InterviewClient({ sessionId }: { sessionId: string }) {
     }
     
     try {
-      await retryWithBackoff(
+      const result = await retryWithBackoff(
         async () => {
           const res = await fetch(`/api/sessions/${sessionId}/start`, {
             method: "POST",
           });
           
+          const json = await res.json().catch(() => ({}));
+          
           if (!res.ok) {
-            const json = await res.json().catch(() => ({}));
-            const error = new Error(json.error || `Failed to start interview (${res.status})`);
+            const error = new Error(json.error || json.message || `Failed to start interview (${res.status})`);
             (error as any).status = res.status;
             
             // Don't retry on client errors (4xx) - these are permanent errors
@@ -355,7 +356,9 @@ export default function InterviewClient({ sessionId }: { sessionId: string }) {
             throw error;
           }
           
-          return res;
+          // Parse the response
+          const responseData = json.data || json;
+          return responseData;
         },
         {
           maxRetries: 3,
@@ -370,12 +373,23 @@ export default function InterviewClient({ sessionId }: { sessionId: string }) {
         }
       );
       
+      clientLogger.info("Interview start API call successful", { sessionId, result });
+      
       // Wait a bit for database to update, then refresh
-      await new Promise(resolve => setTimeout(resolve, 1000));
+      await new Promise(resolve => setTimeout(resolve, 500));
       await refresh();
+      
+      // Verify that questions were loaded
+      if (!data?.questions || data.questions.length === 0) {
+        clientLogger.warn("Questions not found after refresh, retrying refresh", { sessionId });
+        // Try refreshing again after a longer delay
+        await new Promise(resolve => setTimeout(resolve, 1000));
+        await refresh();
+      }
       
       // Reset loading state after refresh
       setLoading(false);
+      setIsTyping(false);
     } catch (error) {
       const err = error instanceof Error ? error : new Error(String(error));
       clientLogger.error("Failed to start interview after retries", err, { sessionId });
