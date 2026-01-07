@@ -166,15 +166,43 @@ export async function updateSession(
     table: TABLES.SESSIONS,
     updatePayloadKeys: Object.keys(updatePayload),
     questionsCount: questions.length,
-    status: updatePayload.status
+    status: updatePayload.status,
+    questionsType: Array.isArray(questions) ? 'array' : typeof questions,
+    questionsIsArray: Array.isArray(questions)
   });
   
-  const { data, error } = await supabase
+  // Log a sample of the questions to verify structure
+  if (questions.length > 0) {
+    logger.debug('Questions sample', {
+      sessionId: id,
+      firstQuestion: {
+        id: questions[0]?.id,
+        text: questions[0]?.text?.substring(0, 100),
+        category: questions[0]?.category,
+        hasId: !!questions[0]?.id,
+        hasText: !!questions[0]?.text
+      }
+    });
+  }
+  
+  const { data, error, count } = await supabase
     .from(TABLES.SESSIONS)
     .update(updatePayload)
     .eq('id', id)
     .select()
     .single();
+
+  logger.debug('Supabase update response', {
+    sessionId: id,
+    hasError: !!error,
+    hasData: !!data,
+    errorCode: error?.code,
+    errorMessage: error?.message,
+    dataStatus: data?.status,
+    dataQuestionsCount: data?.questions?.length,
+    dataQuestionsType: typeof data?.questions,
+    dataQuestionsIsArray: Array.isArray(data?.questions)
+  });
 
   if (error) {
     logger.error('Error updating session in Supabase', new Error(error.message), { 
@@ -209,7 +237,10 @@ export async function updateSession(
     sessionId: id, 
     status: mapped.status, 
     questionCount: mapped.questions?.length || 0,
-    returnedQuestionCount: data.questions?.length || 0
+    returnedQuestionCount: data.questions?.length || 0,
+    returnedStatus: data.status,
+    mappedStatus: mapped.status,
+    questionsMatch: mapped.questions?.length === questions.length
   });
 
   return mapped;
