@@ -33,12 +33,6 @@ export default function ModePage() {
               >
                 Create Interview <ArrowRight className="w-4 h-4" />
               </Link>
-              <Link
-                href="/company/dashboard"
-                className="flex-1 inline-flex items-center justify-center text-[var(--muted)] font-medium text-sm gap-1 border border-[var(--border)] rounded px-4 py-2 hover:bg-[var(--bg)] transition-colors"
-              >
-                View Dashboard
-              </Link>
             </div>
           </Card>
         </div>
@@ -63,12 +57,6 @@ export default function ModePage() {
               >
                 Create Template <ArrowRight className="w-4 h-4" />
               </Link>
-              <Link
-                href="/college/dashboard"
-                className="flex-1 inline-flex items-center justify-center text-[var(--muted)] font-medium text-sm gap-1 border border-[var(--border)] rounded px-4 py-2 hover:bg-[var(--bg)] transition-colors"
-              >
-                View Dashboard
-              </Link>
             </div>
           </Card>
         </div>
@@ -92,12 +80,6 @@ export default function ModePage() {
                 className="flex-1 inline-flex items-center justify-center text-[var(--primary)] font-medium text-sm gap-1 border border-[var(--primary)] rounded px-4 py-2 hover:bg-[var(--primary)] hover:text-white transition-colors"
               >
                 Start Interview <ArrowRight className="w-4 h-4" />
-              </Link>
-              <Link
-                href="/individual/dashboard"
-                className="flex-1 inline-flex items-center justify-center text-[var(--muted)] font-medium text-sm gap-1 border border-[var(--border)] rounded px-4 py-2 hover:bg-[var(--bg)] transition-colors"
-              >
-                View Dashboard
               </Link>
             </div>
           </Card>

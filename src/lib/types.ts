@@ -56,6 +56,12 @@ export type InterviewReport = {
     evidenceType: "technical" | "leadership" | "communication" | "problem_solving";
   }>;
   nextRoundFocus: string[]; // 4-6 bullets
+  securitySummary?: {
+    tabSwitchCount: number;
+    securityEventCount: number;
+    criticalEvents: string[];
+    summary: string; // AI-generated summary of security concerns
+  };
 };
 
 // New: Interview configuration
@@ -130,5 +136,10 @@ export type InterviewSession = {
   studentId?: string;
   tabSwitchCount?: number; // For cheating detection
   tabSwitchEvents?: Array<{ timestamp: number; type: "blur" | "focus" }>;
+  securityEvents?: Array<{ 
+    event: string; 
+    timestamp: number; 
+    details?: Record<string, any> 
+  }>;
 };
 

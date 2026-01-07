@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
-import { ArrowLeft, ArrowRight, Check, Lock, ArrowRight as ArrowRightIcon, CheckCircle2 } from "lucide-react";
+import { ArrowLeft, ArrowRight, Check, Lock, ArrowRight as ArrowRightIcon, CheckCircle2, Briefcase, GraduationCap, User, Code, TrendingUp, Clock, Circle, Shield, AlertTriangle, Lightbulb, Timer, UserCircle, Layers, Volume2, VolumeX, Maximize2, Minimize2 } from "lucide-react";
 import Card from "@/components/Card";
 import Badge from "@/components/Badge";
 import Progress from "@/components/Progress";
@@ -13,6 +13,10 @@ import { clientLogger } from "@/lib/clientLogger";
 import PresenceCheckModal from "@/components/PresenceCheckModal";
 import VoiceAnswerRecorder from "@/components/VoiceAnswerRecorder";
 import { ToastManager, ToastType } from "@/components/Toast";
+import { SecurityMonitor } from "@/components/SecurityMonitor";
+import { isMobileDevice, getDeviceInfo } from "@/lib/deviceDetection";
+import InterviewRulesModal from "@/components/InterviewRulesModal";
+import { retryWithBackoff, isRetryableError } from "@/lib/retry";
 
 type ApiState = {
   session: {
@@ -112,7 +116,7 @@ function getStatusBadgeVariant(status: string): "default" | "success" | "warning
 
 export default function InterviewClient({ sessionId }: { sessionId: string }) {
   const searchParams = useSearchParams();
-  const isRecruiterView = searchParams.get("view") === "recruiter";
+  const isRecruiterView = searchParams?.get("view") === "recruiter";
   
   const [data, setData] = useState<ApiState | null>(null);
   const [loading, setLoading] = useState(false);
@@ -127,16 +131,22 @@ export default function InterviewClient({ sessionId }: { sessionId: string }) {
   const [reportScoreSummary, setReportScoreSummary] = useState<ApiState["scoreSummary"] | null>(null);
   const [initialLoading, setInitialLoading] = useState(true);
   const [readAloud, setReadAloud] = useState(false);
+  const [cameraEnabled, setCameraEnabled] = useState(false); // UI state - always shows as off
   const [isTyping, setIsTyping] = useState(false);
+  const [isSpeaking, setIsSpeaking] = useState(false);
   const [previousQuestionId, setPreviousQuestionId] = useState<string | null>(null);
   const [shareToken, setShareToken] = useState<string | null>(null);
   const [copySuccess, setCopySuccess] = useState(false);
   const [presence, setPresence] = useState<any>(null);
   const [showPresenceModal, setShowPresenceModal] = useState(false);
-  const [focusMode, setFocusMode] = useState(false);
+  const [showRulesModal, setShowRulesModal] = useState(false);
+  const [fullScreenMode, setFullScreenMode] = useState(false);
   const [tabSwitchCount, setTabSwitchCount] = useState(0);
   const [tabSwitchWarning, setTabSwitchWarning] = useState<string | null>(null);
   const [showConfirmDialog, setShowConfirmDialog] = useState(false);
+  const [securityEventCount, setSecurityEventCount] = useState(0);
+  const [isMobile, setIsMobile] = useState(false);
+  const [mobileWarningDismissed, setMobileWarningDismissed] = useState(false);
   const [interviewStartTime, setInterviewStartTime] = useState<number | null>(null);
   const [timeElapsed, setTimeElapsed] = useState(0);
   const [toasts, setToasts] = useState<Array<{ id: string; message: string; type?: ToastType }>>([]);
@@ -177,6 +187,25 @@ export default function InterviewClient({ sessionId }: { sessionId: string }) {
       setInterviewStartTime(startTime);
     }
   }, [data?.session.status, interviewStartTime]);
+
+  // Detect device type
+  useEffect(() => {
+    setIsMobile(isMobileDevice());
+    
+    // Log device info to security events on interview start
+    if (data?.session.status === "in_progress" && !isRecruiterView) {
+      const deviceInfo = getDeviceInfo();
+      fetch(`/api/sessions/${sessionId}/security-event`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ 
+          event: "device_detected", 
+          timestamp: Date.now(),
+          details: deviceInfo
+        }),
+      }).catch(() => {}); // Non-blocking
+    }
+  }, [sessionId, data?.session.status, isRecruiterView]);
 
   // Update elapsed time every second
   useEffect(() => {
@@ -287,31 +316,49 @@ export default function InterviewClient({ sessionId }: { sessionId: string }) {
   async function startInterview() {
     setError(null);
     setLoading(true);
-    // Don't set isTyping here - it should only be set when actually generating questions
-    // setIsTyping(true);
+    
+    // Enter fullscreen mode when interview begins
+    try {
+      if (document.documentElement.requestFullscreen) {
+        await document.documentElement.requestFullscreen();
+      } else if ((document.documentElement as any).webkitRequestFullscreen) {
+        await (document.documentElement as any).webkitRequestFullscreen();
+      } else if ((document.documentElement as any).mozRequestFullScreen) {
+        await (document.documentElement as any).mozRequestFullScreen();
+      } else if ((document.documentElement as any).msRequestFullscreen) {
+        await (document.documentElement as any).msRequestFullscreen();
+      }
+      setFullScreenMode(true);
+    } catch (error) {
+      // Fullscreen request failed (user may have denied permission)
+      console.warn("Could not enter fullscreen:", error);
+    }
     
     try {
-      const res = await fetch(`/api/sessions/${sessionId}/start`, {
-        method: "POST",
-      });
-      
-      let json: any = {};
-      try {
-        json = await res.json();
-      } catch (e) {
-        clientLogger.error("Failed to parse response", e instanceof Error ? e : new Error(String(e)), { sessionId });
-        setError("Failed to parse server response");
-        setLoading(false);
-        return;
-      }
-      
-      if (!res.ok) {
-        const errorMsg = json.error || `Failed to start interview (${res.status})`;
-        setError(errorMsg);
-        addToast(errorMsg, "error");
-        setLoading(false);
-        return;
-      }
+      await retryWithBackoff(
+        async () => {
+          const res = await fetch(`/api/sessions/${sessionId}/start`, {
+            method: "POST",
+          });
+          
+          if (!res.ok) {
+            const json = await res.json().catch(() => ({}));
+            const error = new Error(json.error || `Failed to start interview (${res.status})`);
+            (error as any).status = res.status;
+            throw error;
+          }
+          
+          return res;
+        },
+        {
+          maxRetries: 3,
+          initialDelay: 1000,
+          onRetry: (attempt, error) => {
+            addToast(`Retrying... (attempt ${attempt}/3)`, "info");
+            clientLogger.error("Retrying start interview", error instanceof Error ? error : new Error(String(error)), { sessionId, attempt });
+          },
+        }
+      );
       
       // Wait a bit for database to update, then refresh
       await new Promise(resolve => setTimeout(resolve, 1000));
@@ -320,8 +367,16 @@ export default function InterviewClient({ sessionId }: { sessionId: string }) {
       // Reset loading state after refresh
       setLoading(false);
     } catch (error) {
-      clientLogger.error("Network error starting interview", error instanceof Error ? error : new Error(String(error)), { sessionId });
-      const errorMsg = "Network error. Please check your connection and try again.";
+      const err = error instanceof Error ? error : new Error(String(error));
+      clientLogger.error("Failed to start interview after retries", err, { sessionId });
+      
+      let errorMsg = "Failed to start interview. ";
+      if (isRetryableError(error)) {
+        errorMsg += "Please check your connection and try again.";
+      } else {
+        errorMsg += err.message || "An unexpected error occurred.";
+      }
+      
       setError(errorMsg);
       addToast(errorMsg, "error");
       setLoading(false);
@@ -433,55 +488,77 @@ export default function InterviewClient({ sessionId }: { sessionId: string }) {
     }
 
     try {
-      const res = await fetch(`/api/sessions/${sessionId}/answer`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ answerText: answerText.trim() }),
-      });
+      const result = await retryWithBackoff(
+        async () => {
+          const res = await fetch(`/api/sessions/${sessionId}/answer`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ answerText: answerText.trim() }),
+          });
 
-      const json = (await res.json().catch(() => ({}))) as Partial<EvalResp> & {
-        error?: string;
-        message?: string;
-        details?: string;
-        data?: any;
-      };
+          const json = (await res.json().catch(() => ({}))) as Partial<EvalResp> & {
+            error?: string;
+            message?: string;
+            details?: string;
+            data?: any;
+          };
 
-      if (!res.ok) {
-        // Extract error message from standardized API response
-        const errorMsg = json.error || json.message || json.details || `Failed to submit answer (${res.status})`;
-        setError(errorMsg);
-        addToast(errorMsg, "error");
-        setIsTyping(false);
-        setLoading(false);
-        setIsSubmitting(false);
-        clientLogger.error("Answer submission failed", new Error(errorMsg), { 
-          sessionId, 
-          status: res.status,
-          response: json 
-        });
-        return;
-      }
+          if (!res.ok) {
+            const errorMsg = json.error || json.message || json.details || `Failed to submit answer (${res.status})`;
+            const error = new Error(errorMsg);
+            (error as any).status = res.status;
+            throw error;
+          }
 
-      // Handle standardized API response format
+          return { res, json };
+        },
+        {
+          maxRetries: 2, // Fewer retries for answer submission
+          initialDelay: 500,
+          onRetry: (attempt) => {
+            addToast(`Retrying submission... (attempt ${attempt}/2)`, "info");
+          },
+        }
+      );
+
+      // Handle successful response
+      const { json } = result;
       const responseData = (json as any).data || json;
       setLastEval(responseData as EvalResp);
       setAnswerText("");
       setShowConfirmDialog(false);
+      
+      // Update state immediately with the advanced index from response
+      if (responseData.advancedToIndex !== undefined && data) {
+        setData({
+          ...data,
+          session: {
+            ...data.session,
+            currentQuestionIndex: responseData.advancedToIndex,
+            status: responseData.status || data.session.status,
+          },
+        });
+      }
+      
+      // Wait a bit for database to commit, then refresh to get full updated state
+      await new Promise(resolve => setTimeout(resolve, 300));
       await refresh();
-      // Small delay to show typing indicator for next question
       setTimeout(() => {
         setIsTyping(false);
         setLoading(false);
         setIsSubmitting(false);
       }, 500);
     } catch (error) {
+      const err = error instanceof Error ? error : new Error(String(error));
+      const errorMsg = err.message || "Failed to submit answer. Please try again.";
+      setError(errorMsg);
+      addToast(errorMsg, "error");
       setIsTyping(false);
       setLoading(false);
       setIsSubmitting(false);
-      const errorMsg = error instanceof Error ? error.message : "Network error submitting answer";
-      setError(errorMsg);
-      addToast(errorMsg, "error");
-      clientLogger.error("Network error submitting answer", error instanceof Error ? error : new Error(String(error)), { sessionId });
+      clientLogger.error("Answer submission failed after retries", err, { 
+        sessionId
+      });
     }
   }
 
@@ -518,6 +595,31 @@ export default function InterviewClient({ sessionId }: { sessionId: string }) {
       return () => window.removeEventListener("beforeunload", handleBeforeUnload);
     }
   }, [data?.session.status, completed]);
+
+  // Listen for fullscreen changes
+  useEffect(() => {
+    const handleFullscreenChange = () => {
+      const isFullscreen = !!(
+        document.fullscreenElement ||
+        (document as any).webkitFullscreenElement ||
+        (document as any).mozFullScreenElement ||
+        (document as any).msFullscreenElement
+      );
+      setFullScreenMode(isFullscreen);
+    };
+
+    document.addEventListener("fullscreenchange", handleFullscreenChange);
+    document.addEventListener("webkitfullscreenchange", handleFullscreenChange);
+    document.addEventListener("mozfullscreenchange", handleFullscreenChange);
+    document.addEventListener("MSFullscreenChange", handleFullscreenChange);
+
+    return () => {
+      document.removeEventListener("fullscreenchange", handleFullscreenChange);
+      document.removeEventListener("webkitfullscreenchange", handleFullscreenChange);
+      document.removeEventListener("mozfullscreenchange", handleFullscreenChange);
+      document.removeEventListener("MSFullscreenChange", handleFullscreenChange);
+    };
+  }, []);
 
   // Keyboard shortcuts
   useEffect(() => {
@@ -564,6 +666,86 @@ export default function InterviewClient({ sessionId }: { sessionId: string }) {
     }
   }, [data?.currentQuestion?.id, previousQuestionId]);
 
+  // Tab switch tracking (visibility API)
+  useEffect(() => {
+    if (!started || completed || isRecruiterView) return;
+
+    const handleVisibilityChange = async () => {
+      if (document.hidden) {
+        // Tab switched away (blur)
+        try {
+          const res = await fetch(`/api/sessions/${sessionId}/tab-switch`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ type: "blur", timestamp: Date.now() }),
+          });
+          const data = await res.json();
+          if (data.success && data.data) {
+            const newCount = data.data.tabSwitchCount || 0;
+            setTabSwitchCount(newCount);
+            if (data.data.warning) {
+              setTabSwitchWarning(data.data.warning);
+              // Show toast for warnings
+              if (newCount > 3) {
+                addToast(data.data.warning, "warning");
+              }
+            } else {
+              setTabSwitchWarning(null);
+            }
+          }
+        } catch (err) {
+          clientLogger.error("Failed to log tab switch", err instanceof Error ? err : new Error(String(err)));
+        }
+      } else {
+        // Tab switched back (focus)
+        try {
+          await fetch(`/api/sessions/${sessionId}/tab-switch`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ type: "focus", timestamp: Date.now() }),
+          });
+        } catch (err) {
+          clientLogger.error("Failed to log tab focus", err instanceof Error ? err : new Error(String(err)));
+        }
+      }
+    };
+
+    const handleBlur = () => {
+      if (document.hidden) return; // Already handled by visibilitychange
+      handleVisibilityChange();
+    };
+
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    window.addEventListener("blur", handleBlur);
+
+    return () => {
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+      window.removeEventListener("blur", handleBlur);
+    };
+  }, [sessionId, started, completed, isRecruiterView, refresh]);
+
+  // Handle security events - only count critical events, not routine checks
+  const handleSecurityEvent = (event: string) => {
+    // Only count actual security violations, not routine monitoring
+    const criticalEvents = [
+      "devtools_detected",
+      "screenshot_attempt",
+      "clipboard_write_attempt",
+      "keyboard_shortcut_blocked",
+      "right_click_blocked"
+    ];
+    
+    if (criticalEvents.includes(event)) {
+      setSecurityEventCount(prev => prev + 1);
+      
+      // Show toast for critical events
+      if (["devtools_detected", "screenshot_attempt"].includes(event)) {
+        addToast(`Security alert: ${event.replace(/_/g, ' ')}`, "error");
+      }
+    }
+    // Don't count routine checks like presence checks, idle detection, etc.
+  };
+
   const scoreSummary = reportScoreSummary || data?.scoreSummary || lastEval?.scoreSummary;
   const lowestScore = scoreSummary
     ? Math.min(
@@ -593,9 +775,38 @@ export default function InterviewClient({ sessionId }: { sessionId: string }) {
   const showTyping = isTyping && !!data?.currentQuestion && !loading;
 
   return (
-    <div className={`space-y-6 ${focusMode ? "bg-slate-50 p-4 rounded-lg" : ""}`}>
+    <div 
+      className="space-y-6"
+      style={started && !completed && !isRecruiterView ? { 
+        userSelect: 'none',
+        WebkitUserSelect: 'none',
+        MozUserSelect: 'none',
+        msUserSelect: 'none'
+      } : {}}
+    >
+      {/* Security Monitor - Only active during interview */}
+      {started && !completed && !isRecruiterView && (
+        <SecurityMonitor 
+          sessionId={sessionId} 
+          enabled={true}
+          onSecurityEvent={handleSecurityEvent}
+        />
+      )}
+      
       {/* Toast Manager */}
       <ToastManager toasts={toasts} onRemove={removeToast} />
+
+      {/* Interview Rules Modal */}
+      {showRulesModal && (
+        <InterviewRulesModal
+          sessionId={sessionId}
+          onAccept={() => {
+            setShowRulesModal(false);
+            startInterview();
+          }}
+          onDecline={() => setShowRulesModal(false)}
+        />
+      )}
 
       {/* Presence Modal */}
       {showPresenceModal && (
@@ -607,47 +818,104 @@ export default function InterviewClient({ sessionId }: { sessionId: string }) {
         />
       )}
 
+      {/* Mobile Device Warning Banner */}
+      {isMobile && !mobileWarningDismissed && started && !completed && !isRecruiterView && (
+        <div className="bg-yellow-50 border-l-4 border-yellow-400 p-4 rounded-lg">
+          <div className="flex items-start justify-between gap-4">
+            <div className="flex-1">
+              <p className="text-sm font-medium text-yellow-800 flex items-center gap-2">
+                <span>⚠️</span> Desktop Recommended
+              </p>
+              <p className="text-sm text-yellow-700 mt-1">
+                For the best interview experience and security, please use a desktop or laptop computer. 
+                Some security features may be limited on mobile devices, and typing long answers may be difficult.
+              </p>
+            </div>
+            <button
+              onClick={() => setMobileWarningDismissed(true)}
+              className="text-yellow-800 hover:text-yellow-900 text-xl font-bold leading-none flex-shrink-0"
+              aria-label="Dismiss warning"
+            >
+              ×
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Top Header Bar */}
-      <div className="sticky top-0 z-10 bg-[var(--bg)]/80 backdrop-blur-sm border-b border-[var(--border)] py-3 -mx-4 px-4 mb-6">
+      <div className="sticky top-0 z-10 bg-[var(--bg)]/95 backdrop-blur-md border-b border-[var(--border)] py-4 -mx-4 px-4 mb-6">
         <div className="flex items-center justify-between">
           <div>
-            <h1 className="text-lg font-semibold text-[var(--text)]">AI Interview Platform</h1>
-            <p className="text-xs text-[var(--muted)] mt-0.5">Interview session</p>
+            <h1 className="text-lg font-semibold text-[var(--text)]">Interview Session</h1>
+            <p className="text-xs text-[var(--muted)] mt-0.5">AI-Powered Assessment</p>
           </div>
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2">
             {presence?.completedAt && (
-              <Badge variant="success" className="app-badge">Presence</Badge>
-            )}
-            {timeElapsed > 0 && data?.session.status === "in_progress" && (
-              <Badge variant="info" className="app-badge">
-                <span title="Time elapsed">⏱️ {formatTime(timeElapsed)}</span>
+              <Badge variant="success" className="app-badge flex items-center gap-1.5">
+                <Shield className="w-3 h-3" />
+                Verified
               </Badge>
             )}
-            {tabSwitchCount > 0 && !isRecruiterView && data?.session.status === "in_progress" && (
-              <Badge 
-                variant={tabSwitchCount > 3 ? "error" : "warning"} 
-                className="app-badge"
-              >
-                {tabSwitchCount} Switch{tabSwitchCount > 1 ? "es" : ""}
+            {timeElapsed > 0 && data?.session.status === "in_progress" && (
+              <Badge variant="info" className="app-badge flex items-center gap-1.5">
+                <Timer className="w-3 h-3" />
+                {formatTime(timeElapsed)}
               </Badge>
             )}
             <Badge variant={getStatusBadgeVariant(data?.session.status || "created")} className="app-badge">
               {data?.session.status === "in_progress"
-                ? "In progress"
+                ? "In Progress"
                 : data?.session.status === "completed"
                 ? "Completed"
-                : "Created"}
+                : "Ready"}
             </Badge>
             {started && !completed && (
-              <label className="flex items-center gap-2 cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={focusMode}
-                  onChange={(e) => setFocusMode(e.target.checked)}
-                  className="rounded border-slate-300 text-[var(--primary)] focus:ring-2 focus:ring-indigo-200"
-                />
-                <span className="text-xs text-[var(--muted)]">Focus mode</span>
-              </label>
+              <button
+                onClick={async () => {
+                  const enabled = !fullScreenMode;
+                  setFullScreenMode(enabled);
+                  try {
+                    if (enabled) {
+                      if (document.documentElement.requestFullscreen) {
+                        await document.documentElement.requestFullscreen();
+                      } else if ((document.documentElement as any).webkitRequestFullscreen) {
+                        await (document.documentElement as any).webkitRequestFullscreen();
+                      } else if ((document.documentElement as any).mozRequestFullScreen) {
+                        await (document.documentElement as any).mozRequestFullScreen();
+                      } else if ((document.documentElement as any).msRequestFullscreen) {
+                        await (document.documentElement as any).msRequestFullscreen();
+                      }
+                    } else {
+                      if (document.exitFullscreen) {
+                        await document.exitFullscreen();
+                      } else if ((document as any).webkitExitFullscreen) {
+                        await (document as any).webkitExitFullscreen();
+                      } else if ((document as any).mozCancelFullScreen) {
+                        await (document as any).mozCancelFullScreen();
+                      } else if ((document as any).msExitFullscreen) {
+                        await (document as any).msExitFullscreen();
+                      }
+                    }
+                  } catch (error) {
+                    console.error("Fullscreen error:", error);
+                    setFullScreenMode(!enabled);
+                  }
+                }}
+                className="flex items-center gap-2 px-3 py-1.5 rounded-lg hover:bg-[var(--card)] transition-colors border border-[var(--border)]"
+                title={fullScreenMode ? "Exit Full Screen" : "Enter Full Screen"}
+              >
+                {fullScreenMode ? (
+                  <>
+                    <Minimize2 className="w-4 h-4 text-[var(--text)]" />
+                    <span className="text-xs text-[var(--text)]">Exit Full Screen</span>
+                  </>
+                ) : (
+                  <>
+                    <Maximize2 className="w-4 h-4 text-[var(--text)]" />
+                    <span className="text-xs text-[var(--text)]">Full Screen</span>
+                  </>
+                )}
+              </button>
             )}
           </div>
         </div>
@@ -692,51 +960,68 @@ export default function InterviewClient({ sessionId }: { sessionId: string }) {
         </div>
       )}
 
-      {/* Context Card */}
-      <Card className="shadow-sm">
-        <div className="flex flex-wrap items-center gap-4">
-          <div>
-            <p className="text-xs text-slate-500 mb-1">Mode</p>
-            <Badge variant="info">
-              {data?.session.mode === "company" 
-                ? "Company" 
-                : data?.session.mode === "college"
-                ? "College"
-                : "Individual"}
-            </Badge>
-          </div>
-          {data?.session.role && (
-            <div>
-              <p className="text-xs text-slate-500 mb-1">Role</p>
-              <p className="text-sm font-medium">{data.session.role}</p>
-            </div>
-          )}
-          {data?.session.level && (
-            <div>
-              <p className="text-xs text-slate-500 mb-1">Level</p>
-              <Badge>{data.session.level}</Badge>
-            </div>
-          )}
-          <div className="ml-auto flex items-center gap-3">
-            {presence?.completedAt && (
-              <div>
-                <p className="text-xs text-slate-500 mb-1">Presence</p>
-                <Badge variant="success">Presence captured</Badge>
+      {/* Context Card - Professional Interview Header */}
+      <Card className="shadow-sm border border-[var(--border)] bg-gradient-to-r from-[var(--bg)] to-[var(--card)]">
+        <div className="flex items-center justify-between py-3">
+          <div className="flex items-center gap-8">
+            {/* Role & Level - Primary Info */}
+            {data?.session.role && (
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-lg bg-[var(--primary)]/10 flex items-center justify-center">
+                  <UserCircle className="w-5 h-5 text-[var(--primary)]" />
+                </div>
+                <div>
+                  <p className="text-xs text-[var(--muted)] font-medium">Position</p>
+                  <p className="text-base font-semibold text-[var(--text)]">{data.session.role}</p>
+                </div>
               </div>
             )}
-            <div>
-              <p className="text-xs text-slate-500 mb-1">Status</p>
-              <Badge variant={getStatusBadgeVariant(data?.session.status || "created")}>
+
+            {data?.session.level && (
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-lg bg-[var(--primary)]/10 flex items-center justify-center">
+                  <Layers className="w-5 h-5 text-[var(--primary)]" />
+                </div>
+                <div>
+                  <p className="text-xs text-[var(--muted)] font-medium">Level</p>
+                  <p className="text-base font-semibold text-[var(--text)] capitalize">{data.session.level}</p>
+                </div>
+              </div>
+            )}
+
+            {/* Divider */}
+            {(data?.session.role || data?.session.level) && (
+              <div className="h-12 w-px bg-[var(--border)]" />
+            )}
+
+            {/* Status - Subtle Badge */}
+            <div className="flex items-center gap-2">
+              {data?.session.status === "completed" ? (
+                <CheckCircle2 className="w-4 h-4 text-[var(--success)]" />
+              ) : data?.session.status === "in_progress" ? (
+                <Clock className="w-4 h-4 text-[var(--primary)]" />
+              ) : null}
+              <Badge 
+                variant={getStatusBadgeVariant(data?.session.status || "created")} 
+                className="text-xs px-3 py-1"
+              >
                 {data?.session.status === "in_progress"
-                  ? "In Progress"
+                  ? "Interview in Progress"
                   : data?.session.status === "completed"
-                  ? "Completed"
-                  : "Created"}
+                  ? "Interview Completed"
+                  : "Ready to Begin"}
               </Badge>
             </div>
           </div>
+
+          {/* Presence Verification - Right Side */}
+          {presence?.completedAt && (
+            <div className="flex items-center gap-2 px-4 py-2 rounded-lg bg-[var(--success)]/10 border border-[var(--success)]/20">
+              <Shield className="w-4 h-4 text-[var(--success)]" />
+              <span className="text-xs font-medium text-[var(--success)]">Identity Verified</span>
+            </div>
+          )}
         </div>
-        <p className="mt-3 text-xs text-[var(--muted)] font-mono">{sessionId}</p>
       </Card>
 
       {!started ? (
@@ -749,36 +1034,126 @@ export default function InterviewClient({ sessionId }: { sessionId: string }) {
             </div>
           ) : (
             <>
+              <h3 className="text-lg font-semibold text-[var(--text)] mb-2">Ready to begin</h3>
               <p className="text-sm text-[var(--muted)] mb-4">
-                Ready to begin. Click below to generate interview questions.
+                Please review the interview rules and security guidelines before starting.
               </p>
               <button
-                onClick={startInterview}
+                onClick={() => {
+                  // Check if rules were already accepted
+                  const rulesAccepted = localStorage.getItem(`rulesAccepted:${sessionId}`);
+                  if (rulesAccepted) {
+                    // Skip modal if already accepted
+                    startInterview();
+                  } else {
+                    // Show modal if not accepted
+                    setShowRulesModal(true);
+                  }
+                }}
                 disabled={loading}
                 className="app-btn-primary px-6 py-2.5 disabled:opacity-60 disabled:cursor-not-allowed"
               >
-                {loading ? "Starting..." : "Begin interview"}
+                {loading ? "Starting..." : "Review Rules & Begin Interview"}
               </button>
             </>
           )}
         </Card>
-      ) : (
-        <div className="relative">
+      ) : !(completed && report) ? (
+        <div className="relative space-y-6">
           {/* Main 2-Column Layout for Desktop */}
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 max-w-7xl mx-auto">
-            {/* Left Column: AI Interviewer + Question */}
-            <div className="space-y-6">
-              {/* AI Interviewer Panel */}
-              <Card variant="elevated">
-                <InterviewerPanel
-                  question={currentQuestionText}
-                  isTyping={showTyping}
-                  readAloud={readAloud}
-                  onReadAloudChange={setReadAloud}
-                  showVideoPlaceholder={true}
-                />
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 w-full">
+            {/* Left Column: AI Interviewer + Evaluation */}
+            <div className="space-y-6 flex flex-col">
+              {/* AI Interviewer Panel - Reduced size */}
+              <Card variant="elevated" className="flex-shrink-0">
+                <div className="scale-90 origin-top">
+                  <InterviewerPanel
+                    question={currentQuestionText}
+                    isTyping={showTyping}
+                    readAloud={readAloud}
+                    onReadAloudChange={setReadAloud}
+                    showVideoPlaceholder={true}
+                    cameraEnabled={cameraEnabled}
+                    onCameraToggle={setCameraEnabled}
+                    tabSwitchCount={tabSwitchCount}
+                    tabSwitchWarning={tabSwitchWarning}
+                    securityEventCount={securityEventCount}
+                    isRecruiterView={isRecruiterView}
+                    sessionStatus={data?.session.status}
+                  />
+                </div>
               </Card>
 
+              {/* Latest Evaluation - Expanded to match right column height */}
+              {lastEval?.evaluation && !completed && (
+                <Card variant="outlined" className="shadow-sm flex-1 flex flex-col min-h-0">
+                  <h4 className="text-sm font-semibold text-[var(--text)] mb-3">Latest evaluation</h4>
+                  <div className="flex items-center gap-4 mb-3">
+                    <div>
+                      <p className="text-xs text-[var(--muted)] mb-1">Overall</p>
+                      <p className="text-xl font-bold text-[var(--primary)]">
+                        {lastEval.evaluation.overall}/10
+                      </p>
+                    </div>
+                    <div className="flex gap-4 flex-1">
+                      <div>
+                        <p className="text-xs text-[var(--muted)] mb-1">Technical</p>
+                        <p className="text-sm font-semibold text-[var(--text)]">{lastEval.evaluation.scores.technical}</p>
+                      </div>
+                      <div>
+                        <p className="text-xs text-[var(--muted)] mb-1">Communication</p>
+                        <p className="text-sm font-semibold text-[var(--text)]">
+                          {lastEval.evaluation.scores.communication}
+                        </p>
+                      </div>
+                      <div>
+                        <p className="text-xs text-[var(--muted)] mb-1">Problem Solving</p>
+                        <p className="text-sm font-semibold text-[var(--text)]">
+                          {lastEval.evaluation.scores.problemSolving}
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-2 gap-4 flex-1">
+                    {lastEval.evaluation.strengths && lastEval.evaluation.strengths.length > 0 && (
+                      <div className="flex flex-col">
+                        <p className="text-xs font-medium text-[var(--text)] mb-2">Strengths</p>
+                        <ul className="space-y-2 flex-1">
+                          {lastEval.evaluation.strengths.map((s, i) => (
+                            <li key={i} className="flex items-start text-xs text-[var(--muted)]">
+                              <CheckCircle2 className="w-3.5 h-3.5 text-green-600 mr-2 mt-0.5 flex-shrink-0" />
+                              <span>{s}</span>
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+                    {lastEval.evaluation.gaps && lastEval.evaluation.gaps.length > 0 && (
+                      <div className="flex flex-col">
+                        <p className="text-xs font-medium text-[var(--text)] mb-2">Areas to improve</p>
+                        <ul className="space-y-2 flex-1">
+                          {lastEval.evaluation.gaps.map((g, i) => (
+                            <li key={i} className="flex items-start text-xs text-[var(--muted)]">
+                              <ArrowRightIcon className="w-3.5 h-3.5 text-yellow-600 mr-2 mt-0.5 flex-shrink-0" />
+                              <span>{g}</span>
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+                  </div>
+                  {lastEval.evaluation.followUpQuestion && (
+                    <div className="mt-4 pt-4 border-t border-[var(--border)] rounded-lg bg-slate-50 p-3">
+                      <p className="text-xs font-medium text-[var(--text)] mb-1">Suggested follow-up</p>
+                      <p className="text-xs text-[var(--muted)]">{lastEval.evaluation.followUpQuestion}</p>
+                    </div>
+                  )}
+                </Card>
+              )}
+            </div>
+
+            {/* Right Column: Question + Answer Area */}
+            <div className="space-y-6 flex flex-col">
               {/* Question Card - Only show if we have a question */}
               {!completed && data?.currentQuestion && (
                 <Card variant="elevated" className="transition-all duration-300">
@@ -791,7 +1166,7 @@ export default function InterviewClient({ sessionId }: { sessionId: string }) {
                         <Badge className="app-badge">{data.currentQuestion.category}</Badge>
                         <Badge variant="default" className="app-badge">{data.currentQuestion.difficulty}</Badge>
                       </div>
-                      <div className="flex gap-2">
+                      <div className="flex gap-2 items-center">
                         {data.session.currentQuestionIndex > 0 && (
                           <button
                             onClick={previousQuestion}
@@ -799,6 +1174,43 @@ export default function InterviewClient({ sessionId }: { sessionId: string }) {
                             className="app-btn-secondary px-3 py-1.5 text-sm disabled:opacity-60"
                           >
                             <ArrowLeft className="w-4 h-4 inline mr-1" /> Previous
+                          </button>
+                        )}
+                        {/* Read Aloud Button */}
+                        {data.currentQuestion && (
+                          <button
+                            onClick={() => {
+                              if (isSpeaking) {
+                                window.speechSynthesis.cancel();
+                                setIsSpeaking(false);
+                              } else {
+                                const utterance = new SpeechSynthesisUtterance(data.currentQuestion.text);
+                                utterance.rate = 0.9;
+                                utterance.pitch = 1;
+                                utterance.volume = 0.8;
+                                utterance.onstart = () => setIsSpeaking(true);
+                                utterance.onend = () => setIsSpeaking(false);
+                                utterance.onerror = () => setIsSpeaking(false);
+                                window.speechSynthesis.speak(utterance);
+                              }
+                            }}
+                            disabled={loading}
+                            className={`app-btn-secondary px-3 py-1.5 text-sm disabled:opacity-60 flex items-center gap-1.5 ${
+                              isSpeaking ? "bg-blue-100 text-blue-700" : ""
+                            }`}
+                            title={isSpeaking ? "Stop reading" : "Read question aloud"}
+                          >
+                            {isSpeaking ? (
+                              <>
+                                <VolumeX className="w-4 h-4" />
+                                Stop
+                              </>
+                            ) : (
+                              <>
+                                <Volume2 className="w-4 h-4" />
+                                Read
+                              </>
+                            )}
                           </button>
                         )}
                         {data.session.currentQuestionIndex < data.session.totalQuestions - 1 && (
@@ -815,151 +1227,42 @@ export default function InterviewClient({ sessionId }: { sessionId: string }) {
                   </div>
 
                   {/* Question Text */}
-                  <div className="mb-4 p-5 bg-gradient-to-br from-blue-50 to-indigo-50 rounded-lg border border-blue-200">
-                    <p className="text-base text-slate-900 leading-relaxed font-medium">
+                  <div className="mb-4 p-6 bg-[var(--card)] rounded-lg border border-[var(--border)] shadow-sm">
+                    <p className="text-lg text-[var(--text)] leading-relaxed font-medium">
                       {data.currentQuestion.text}
                     </p>
                   </div>
 
-                  {/* Coaching Hint */}
-                  <div className="rounded-lg bg-amber-50 border border-amber-200 p-3">
-                    <p className="text-xs font-medium text-amber-900 mb-1">💡 Coaching Tip</p>
-                    <p className="text-xs text-amber-700">
-                      {getCoachingHint(data.currentQuestion.category)}
-                    </p>
+                  {/* Progress Bar */}
+                  <div className="mt-4 pt-4 border-t border-[var(--border)]">
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="text-xs font-medium text-[var(--muted)]">
+                        Interview Progress
+                      </span>
+                      <span className="text-xs font-semibold text-[var(--text)]">
+                        {currentQuestionNum} of {data.session.totalQuestions}
+                      </span>
+                    </div>
+                    <div className="w-full bg-[var(--border)] rounded-full h-2 overflow-hidden">
+                      <div
+                        className="bg-[var(--primary)] h-2 rounded-full transition-all duration-500 ease-out"
+                        style={{ width: `${Math.round((currentQuestionNum / data.session.totalQuestions) * 100)}%` }}
+                      />
+                    </div>
+                    <div className="mt-2 flex items-center justify-between text-xs text-[var(--muted)]">
+                      <span>{Math.round((currentQuestionNum / data.session.totalQuestions) * 100)}% Complete</span>
+                      <span>{data.session.totalQuestions - currentQuestionNum} remaining</span>
+                    </div>
                   </div>
                 </Card>
               )}
-            </div>
-
-            {/* Right Column: Answer Area */}
-            <div className="space-y-6">
-          {/* Visual Question Timeline */}
-          {!completed && data?.questions && data.questions.length > 0 && (
-            <Card className="shadow-sm overflow-hidden">
-              <div className="p-4">
-                <h4 className="text-sm font-semibold text-[var(--text)] mb-4">Interview Progress</h4>
-                <div className="flex items-center gap-2 overflow-x-auto pb-2">
-                  {data.questions.map((q, idx) => {
-                    const isCurrent = idx === data.session.currentQuestionIndex;
-                    const isAnswered = q.answered;
-                    const isReached = idx <= data.session.currentQuestionIndex;
-                    const isLocked = idx > data.session.currentQuestionIndex;
-                    
-                    return (
-                      <div key={q.id} className="flex items-center gap-2 flex-shrink-0">
-                        {/* Question Circle */}
-                        <div className="relative">
-                          <div
-                            className={`w-10 h-10 rounded-full flex items-center justify-center text-sm font-semibold transition-all ${
-                              isCurrent
-                                ? "bg-[var(--primary)] text-white ring-4 ring-[var(--primary)] ring-opacity-30 scale-110"
-                                : isAnswered
-                                ? "bg-green-500 text-white"
-                                : isLocked
-                                ? "bg-slate-200 text-slate-400 border-2 border-dashed border-slate-300"
-                                : "bg-slate-300 text-slate-600"
-                            }`}
-                          >
-                            {isLocked ? (
-                              <Lock className="w-3 h-3" />
-                            ) : isAnswered ? (
-                              <Check className="w-4 h-4" />
-                            ) : (
-                              <span>{idx + 1}</span>
-                            )}
-                          </div>
-                          {/* Pulse animation for current question */}
-                          {isCurrent && (
-                            <div className="absolute inset-0 rounded-full bg-[var(--primary)] animate-ping opacity-20" />
-                          )}
-                        </div>
-                        
-                        {/* Connector Line (not after last item) */}
-                        {data.questions && idx < data.questions.length - 1 && (
-                          <div
-                            className={`h-1 w-8 transition-colors ${
-                              isAnswered
-                                ? "bg-green-500"
-                                : isReached
-                                ? "bg-[var(--primary)]"
-                                : "bg-slate-200"
-                            }`}
-                          />
-                        )}
-                      </div>
-                    );
-                  })}
-                </div>
-                
-                {/* Status Text */}
-                <div className="mt-4 flex items-center justify-between text-xs">
-                  <div className="flex items-center gap-4">
-                    <div className="flex items-center gap-2">
-                      <div className="w-3 h-3 rounded-full bg-green-500" />
-                      <span className="text-slate-600">Completed</span>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <div className="w-3 h-3 rounded-full bg-[var(--primary)] ring-2 ring-[var(--primary)] ring-opacity-30" />
-                      <span className="text-slate-600">Current</span>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <div className="w-3 h-3 rounded-full bg-slate-200 border-2 border-dashed border-slate-300" />
-                      <span className="text-slate-600">Locked</span>
-                    </div>
-                  </div>
-                  <span className="text-slate-500">
-                    {data.questions.filter(q => q.answered).length} of {data.questions.length} completed
-                  </span>
-                </div>
-              </div>
-            </Card>
-          )}
 
 
               {/* Answer Input Card */}
               {!completed && data?.currentQuestion && (
-                <Card variant="elevated" className="transition-all duration-300">
-                  <div className="mb-4">
-                    <h3 className="text-lg font-semibold text-[var(--text)] mb-2">
-                      Your Response
-                    </h3>
-                    {focusMode && (
-                      <p className="text-xs text-[var(--muted)]">(Paste disabled in focus mode)</p>
-                    )}
-                  </div>
-
-                  {/* Voice Answer Recorder */}
-                  <div className="mb-4">
-                    <VoiceAnswerRecorder
-                      key={data.currentQuestion.id}
-                      onTranscript={(text) => setAnswerText(text)}
-                      disabled={loading || completed}
-                    />
-                  </div>
-
-                  {/* Text Answer Input */}
-                  <div>
-                    <textarea
-                      className="w-full rounded-lg border border-[var(--border)] p-4 text-sm text-[var(--text)] focus:ring-2 focus:ring-indigo-200 focus:border-[var(--primary)] disabled:bg-slate-50 disabled:cursor-not-allowed min-h-[200px]"
-                      rows={8}
-                      value={answerText}
-                      onChange={(e) => setAnswerText(e.target.value)}
-                      onPaste={(e) => {
-                        if (focusMode) {
-                          e.preventDefault();
-                        }
-                      }}
-                      placeholder="Type your response here or use voice recording above..."
-                      disabled={loading || completed}
-                    />
-                    <p className="mt-2 text-xs text-[var(--muted)]">
-                      {answerText.length} characters • Your responses may be quoted in the interview report
-                    </p>
-                  </div>
-
-                  {/* Submit Button */}
-                  <div className="mt-6 flex items-center gap-3">
+                <Card variant="elevated" className="transition-all duration-300 flex-1 flex flex-col min-h-0">
+                  {/* Submit Button - At Top */}
+                  <div className="mb-4 flex items-center gap-3 flex-shrink-0">
                     <button
                       onClick={handleSubmitClick}
                       disabled={isSubmitting || loading || completed || !answerText.trim()}
@@ -969,79 +1272,55 @@ export default function InterviewClient({ sessionId }: { sessionId: string }) {
                     </button>
                     {loading && <Skeleton className="h-10 w-24" />}
                   </div>
-                  <p className="mt-2 text-xs text-center text-[var(--muted)]">
+                  <p className="mb-4 text-xs text-center text-[var(--muted)] flex-shrink-0">
                     Press Ctrl+Enter to submit
                   </p>
-                </Card>
-              )}
 
-              {/* Latest Evaluation */}
-              {lastEval?.evaluation && !completed && (
-                <Card variant="outlined" className="shadow-sm">
-                  <h4 className="text-sm font-semibold text-[var(--text)] mb-3">Latest evaluation</h4>
-                  <div className="flex gap-4 mb-4">
-                    <div>
-                      <p className="text-xs text-[var(--muted)]">Overall</p>
-                      <p className="text-xl font-bold text-[var(--text)]">
-                        {lastEval.evaluation.overall}/10
+                  <div className="mb-4 flex-shrink-0">
+                    <h3 className="text-lg font-semibold text-[var(--text)] mb-1">
+                      Your Response
+                    </h3>
+                    {fullScreenMode && (
+                      <p className="text-xs text-[var(--muted)] mt-1">Full screen mode active</p>
+                    )}
+                  </div>
+
+                  {/* Voice Answer Recorder */}
+                  <div className="mb-4 flex-shrink-0">
+                    <VoiceAnswerRecorder
+                      key={data.currentQuestion.id}
+                      onTranscript={(text) => setAnswerText(text)}
+                      disabled={loading || completed}
+                    />
+                  </div>
+
+                  {/* Text Answer Input - Expands to fill space */}
+                  <div className="flex-1 flex flex-col min-h-0">
+                    <textarea
+                      className="w-full h-full rounded-lg border-2 border-[var(--border)] p-5 text-sm text-[var(--text)] bg-[var(--bg)] focus:ring-2 focus:ring-[var(--primary)]/20 focus:border-[var(--primary)] disabled:bg-slate-50 disabled:cursor-not-allowed resize-none transition-all"
+                      value={answerText}
+                      onChange={(e) => setAnswerText(e.target.value)}
+                      onPaste={(e) => {
+                        // Allow paste in full screen mode
+                      }}
+                      style={{ userSelect: 'text' }} // Allow text selection in textarea
+                      placeholder="Share your thoughts, approach, and examples here. You can also use voice recording above to transcribe your response."
+                      disabled={loading || completed}
+                    />
+                    <div className="mt-3 flex items-center justify-between flex-shrink-0">
+                      <p className="text-xs text-[var(--muted)]">
+                        {answerText.length > 0 ? `${answerText.length} characters` : "Start typing or use voice recording"}
+                      </p>
+                      <p className="text-xs text-[var(--muted)] italic">
+                        Responses may be included in your interview report
                       </p>
                     </div>
-                    <div className="flex gap-3">
-                      <div>
-                        <p className="text-xs text-[var(--muted)]">Technical</p>
-                        <p className="text-sm font-semibold text-[var(--text)]">{lastEval.evaluation.scores.technical}</p>
-                      </div>
-                      <div>
-                        <p className="text-xs text-[var(--muted)]">Communication</p>
-                        <p className="text-sm font-semibold text-[var(--text)]">
-                          {lastEval.evaluation.scores.communication}
-                        </p>
-                      </div>
-                      <div>
-                        <p className="text-xs text-[var(--muted)]">Problem solving</p>
-                        <p className="text-sm font-semibold text-[var(--text)]">
-                          {lastEval.evaluation.scores.problemSolving}
-                        </p>
-                      </div>
-                    </div>
                   </div>
-
-                  <div className="grid md:grid-cols-2 gap-4">
-                    <div>
-                      <p className="text-xs font-medium text-[var(--text)] mb-2">Strengths</p>
-                      <ul className="text-xs text-[var(--muted)] space-y-1">
-                        {lastEval.evaluation.strengths.map((s, i) => (
-                          <li key={i} className="flex items-start">
-                            <CheckCircle2 className="w-3 h-3 text-green-600 mr-2 inline" />
-                            {s}
-                          </li>
-                        ))}
-                      </ul>
-                    </div>
-                    <div>
-                      <p className="text-xs font-medium text-[var(--text)] mb-2">Areas to improve</p>
-                      <ul className="text-xs text-[var(--muted)] space-y-1">
-                        {lastEval.evaluation.gaps.map((g, i) => (
-                          <li key={i} className="flex items-start">
-                            <ArrowRightIcon className="w-3 h-3 text-yellow-600 mr-2 inline" />
-                            {g}
-                          </li>
-                        ))}
-                      </ul>
-                    </div>
-                  </div>
-
-                  {lastEval.evaluation.followUpQuestion && (
-                    <div className="mt-4 rounded-lg bg-slate-50 p-3">
-                      <p className="text-xs font-medium text-[var(--text)] mb-1">Suggested follow-up</p>
-                      <p className="text-xs text-[var(--muted)]">{lastEval.evaluation.followUpQuestion}</p>
-                    </div>
-                  )}
                 </Card>
               )}
 
-              {/* Interview Report */}
-              {completed && (
+              {/* Interview Report - Only show if report not generated yet */}
+              {completed && !report && (
                 <Card variant="elevated" className="shadow-sm">
                   <div className="flex items-center justify-between mb-6">
                     <div>
@@ -1060,15 +1339,13 @@ export default function InterviewClient({ sessionId }: { sessionId: string }) {
                           <Skeleton className="h-4 w-4" variant="circular" />
                           Generating...
                         </span>
-                      ) : report ? (
-                        "Regenerate report"
                       ) : (
                         "Generate report"
                       )}
                     </button>
                   </div>
 
-                  {reportLoading && !report && (
+                  {reportLoading && (
                     <div className="space-y-4">
                       <Skeleton className="h-24" variant="rectangular" />
                       <Skeleton className="h-32" variant="rectangular" />
@@ -1081,36 +1358,12 @@ export default function InterviewClient({ sessionId }: { sessionId: string }) {
                       <p className="text-sm text-red-800 font-medium">{reportError}</p>
                     </div>
                   )}
-
-                  {report && (
-                    <div className="space-y-6">
-                      {/* Share Link Section */}
-                      {shareToken && (
-                        <Card variant="outlined" className="shadow-sm">
-                          <div className="flex items-center justify-between gap-4">
-                            <div className="flex-1 min-w-0">
-                              <p className="text-xs text-[var(--muted)] mb-1">Shareable report link</p>
-                              <p className="text-xs font-mono text-[var(--text)] truncate" id="share-url">
-                                {typeof window !== 'undefined' ? `${window.location.origin}/share/${shareToken}` : `/share/${shareToken}`}
-                              </p>
-                            </div>
-                            <button
-                              onClick={copyShareLink}
-                              className="app-btn-secondary flex-shrink-0 px-4 py-2 text-sm"
-                            >
-                              {copySuccess ? "Copied" : "Copy link"}
-                            </button>
-                          </div>
-                        </Card>
-                      )}
-                    </div>
-                  )}
                 </Card>
               )}
             </div>
           </div>
         </div>
-      )}
+      ) : null}
 
       {/* Report View - Full Width */}
       {completed && report && (

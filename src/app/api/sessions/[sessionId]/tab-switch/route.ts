@@ -52,10 +52,18 @@ export async function POST(
       });
     }
 
+    // Return warning message based on switch count
+    let warning: string | null = null;
+    if (blurCount > 5) {
+      warning = "Excessive tab switching detected. Interview may be flagged.";
+    } else if (blurCount > 3) {
+      warning = "Multiple tab switches detected. Please stay focused.";
+    }
+
     return apiSuccess(
       {
         tabSwitchCount: blurCount,
-        warning: blurCount > 3 ? "Multiple tab switches detected" : null,
+        warning,
       },
       "Tab switch event logged"
     );

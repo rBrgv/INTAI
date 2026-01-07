@@ -293,7 +293,8 @@ export default function CollegePage() {
 
     setBatchId(data.data?.batchId || data.batchId);
     localStorage.removeItem("collegeModeDraft");
-    router.push(`/college/dashboard/${jobTemplateId}`);
+    // Dashboard removed - will be re-added with account system
+    // router.push(`/college/dashboard/${jobTemplateId}`);
   };
 
   return (
@@ -306,14 +307,7 @@ export default function CollegePage() {
           <ArrowLeft className="w-4 h-4" />
           <span>Back</span>
         </button>
-        {jobTemplateId && (
-          <Link
-            href="/college/dashboard"
-            className="text-sm text-[var(--primary)] hover:underline"
-          >
-            View Dashboard →
-          </Link>
-        )}
+        {/* Dashboard removed - will be re-added with account system */}
       </div>
 
       <h2 className="text-2xl font-semibold text-[var(--text)] mb-2">College Mode Setup</h2>

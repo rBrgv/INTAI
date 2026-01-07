@@ -51,7 +51,7 @@ function isGenericFiller(text: string): boolean {
   return false;
 }
 
-function normalizeReport(parsed: any, scoreSummary: { countEvaluated: number; avg: { overall: number } }): InterviewReport {
+function normalizeReport(parsed: any, scoreSummary: { countEvaluated: number; avg: { overall: number } }, securityEvents?: Array<{ event: string; timestamp: number; details?: Record<string, any> }>, tabSwitchCount?: number): InterviewReport {
   const rec = String(parsed?.recommendation ?? "borderline");
   const allowed = new Set(["strong_hire", "hire", "borderline", "no_hire"]);
   const recommendation = allowed.has(rec) ? (rec as any) : "borderline";
@@ -136,6 +136,27 @@ function normalizeReport(parsed: any, scoreSummary: { countEvaluated: number; av
     ? parsed.nextRoundFocus.map((s: any) => String(s).slice(0, 160)).slice(0, 6)
     : [];
 
+  // Normalize security summary
+  let securitySummary: InterviewReport["securitySummary"] = undefined;
+  const securityEventCount = securityEvents?.length || 0;
+  const tabSwitches = tabSwitchCount || 0;
+  
+  if (tabSwitches > 0 || securityEventCount > 0) {
+    const criticalEvents = securityEvents?.filter(e => 
+      ["devtools_detected", "screenshot_attempt", "clipboard_write", "keyboard_shortcut_blocked", "right_click_blocked"].includes(e.event)
+    ).map(e => e.event) || [];
+    
+    securitySummary = {
+      tabSwitchCount: tabSwitches,
+      securityEventCount: securityEventCount,
+      criticalEvents: Array.isArray(parsed?.securitySummary?.criticalEvents) 
+        ? parsed.securitySummary.criticalEvents.map((e: any) => String(e)).slice(0, 10)
+        : criticalEvents.slice(0, 10),
+      summary: String(parsed?.securitySummary?.summary || "").slice(0, 300) || 
+        `Interview monitoring detected ${tabSwitches} tab switch${tabSwitches > 1 ? "es" : ""} and ${securityEventCount} security event${securityEventCount > 1 ? "s" : ""}. ${criticalEvents.length > 0 ? `Critical events include: ${criticalEvents.join(", ")}.` : ""} These may indicate potential integrity concerns that should be considered in the hiring decision.`,
+    };
+  }
+
   return {
     recommendation,
     confidence,
@@ -163,6 +184,7 @@ function normalizeReport(parsed: any, scoreSummary: { countEvaluated: number; av
           },
         ],
     nextRoundFocus: nextRoundFocus.length ? nextRoundFocus : ["Ask for concrete examples and metrics."],
+    securitySummary,
   };
 }
 
@@ -226,6 +248,8 @@ export async function POST(
     answers: session.answers,
     evaluations: session.evaluations,
     scoreSummary: session.scoreSummary,
+    securityEvents: session.securityEvents,
+    tabSwitchCount: session.tabSwitchCount,
   });
 
   const openai = getOpenAI();
@@ -248,7 +272,7 @@ export async function POST(
     return NextResponse.json({ error: "Failed to parse report JSON", raw }, { status: 500 });
   }
 
-  const report = normalizeReport(parsed, session.scoreSummary);
+  const report = normalizeReport(parsed, session.scoreSummary, session.securityEvents, session.tabSwitchCount);
 
   // Generate shareToken if not present
   const shareToken = session.shareToken || crypto.randomUUID().replaceAll("-", "");

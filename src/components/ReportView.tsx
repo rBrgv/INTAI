@@ -1,4 +1,7 @@
-import { ArrowRight, CheckCircle2, FileDown } from "lucide-react";
+"use client";
+
+import { ArrowRight, CheckCircle2, FileDown, AlertTriangle, Lock, X } from "lucide-react";
+import { useRouter } from "next/navigation";
 import Card from "./Card";
 import Badge from "./Badge";
 import { sanitizeForDisplaySync } from "@/lib/sanitize";
@@ -17,6 +20,12 @@ type ReportViewProps = {
       evidenceType?: "technical" | "leadership" | "communication" | "problem_solving";
     }>;
     nextRoundFocus: string[];
+    securitySummary?: {
+      tabSwitchCount: number;
+      securityEventCount: number;
+      criticalEvents: string[];
+      summary: string;
+    };
   };
   scoreSummary?: {
     countEvaluated: number;
@@ -43,10 +52,16 @@ export default function ReportView({
   readOnly = false,
   viewType = "recruiter",
 }: ReportViewProps) {
+  const router = useRouter();
+  
   // For candidate view, hide "no_hire" recommendation and show "borderline" instead
   const displayRecommendation = viewType === "candidate" && report.recommendation === "no_hire" 
     ? "borderline" 
     : report.recommendation;
+
+  const handleExit = () => {
+    router.push("/");
+  };
 
   const handleExportPDF = () => {
     // Add metadata to document before printing
@@ -120,9 +135,16 @@ export default function ReportView({
 
   return (
     <div className="space-y-6" data-report-content>
-      {/* Export Button - At the top */}
+      {/* Action Buttons - At the top */}
       {!readOnly && (
-        <div className="flex justify-end no-print mb-2">
+        <div className="flex justify-between items-center no-print mb-2">
+          <button
+            onClick={handleExit}
+            className="app-btn-secondary px-4 py-2 text-sm flex items-center gap-2 hover:bg-slate-100 transition-colors"
+          >
+            <X className="w-4 h-4" />
+            Exit
+          </button>
           <button
             onClick={handleExportPDF}
             className="app-btn-primary px-4 py-2 text-sm flex items-center gap-2"
@@ -263,6 +285,54 @@ export default function ReportView({
             ))}
         </ul>
       </Card>
+
+      {/* Security Summary */}
+      {report.securitySummary && (report.securitySummary.tabSwitchCount > 0 || report.securitySummary.securityEventCount > 0) && (
+        <Card variant="outlined" className="border-red-200 bg-red-50/50">
+          <div className="flex items-center gap-2 mb-3">
+            <Lock className="w-4 h-4 text-red-600" />
+            <h5 className="text-sm font-semibold text-slate-900">Security Monitoring Summary</h5>
+          </div>
+          
+          <div className="grid md:grid-cols-2 gap-4 mb-4">
+            <div>
+              <p className="text-xs text-slate-600 mb-1">Tab Switches</p>
+              <p className="text-lg font-bold text-red-700">
+                {report.securitySummary.tabSwitchCount}
+              </p>
+            </div>
+            <div>
+              <p className="text-xs text-slate-600 mb-1">Security Events</p>
+              <p className="text-lg font-bold text-red-700">
+                {report.securitySummary.securityEventCount}
+              </p>
+            </div>
+          </div>
+
+          {report.securitySummary.criticalEvents && report.securitySummary.criticalEvents.length > 0 && (
+            <div className="mb-4">
+              <p className="text-xs font-medium text-slate-900 mb-2">Critical Events Detected</p>
+              <ul className="space-y-1">
+                {report.securitySummary.criticalEvents.map((event, i) => (
+                  <li key={i} className="flex items-start text-xs text-slate-700">
+                    <AlertTriangle className="w-3 h-3 text-red-600 mr-2 mt-0.5 flex-shrink-0" />
+                    <span>{event.replace(/_/g, " ").replace(/\b\w/g, l => l.toUpperCase())}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          {report.securitySummary.summary && (
+            <div className="pt-3 border-t border-red-200">
+              <p className="text-xs font-medium text-slate-900 mb-1">Security Assessment</p>
+              <p className="text-xs text-slate-700 leading-relaxed">
+                {sanitizeForDisplaySync(report.securitySummary.summary)}
+              </p>
+            </div>
+          )}
+        </Card>
+      )}
     </div>
   );
 }

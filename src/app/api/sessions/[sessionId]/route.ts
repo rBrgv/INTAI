@@ -56,6 +56,7 @@ export async function GET(
         currentQuestionIndex: session.currentQuestionIndex || 0,
         totalQuestions: session.questions?.length || 0,
         tabSwitchCount: session.tabSwitchCount || 0,
+        securityEvents: session.securityEvents || [],
       },
       currentQuestion,
       questions: questionsWithStatus,
