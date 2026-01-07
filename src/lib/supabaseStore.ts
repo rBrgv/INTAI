@@ -190,12 +190,60 @@ export async function updateSession(
     });
   }
   
+  // Use a fresh query to ensure we get the updated data
   const { data, error, count } = await supabase
     .from(TABLES.SESSIONS)
     .update(updatePayload)
     .eq('id', id)
     .select()
     .single();
+  
+  // If update succeeded, verify with a fresh read to ensure consistency
+  if (!error && data) {
+    console.log(`[UPDATE SESSION] Update succeeded, doing verification read...`);
+    
+    // Do a fresh read to verify the update persisted
+    // Retry a few times in case of read replica lag
+    let verifyData = null;
+    for (let attempt = 0; attempt < 3; attempt++) {
+      await new Promise(resolve => setTimeout(resolve, 100 * (attempt + 1)));
+      
+      const { data: freshData, error: verifyError } = await supabase
+        .from(TABLES.SESSIONS)
+        .select('*')
+        .eq('id', id)
+        .single();
+      
+      if (verifyError) {
+        logger.warn(`Verification read attempt ${attempt + 1} failed`, { sessionId: id, error: verifyError.message });
+        continue;
+      }
+      
+      if (freshData) {
+        console.log(`[UPDATE SESSION] Verification read attempt ${attempt + 1} - status: ${freshData.status}, questions: ${freshData.questions?.length || 0}`);
+        
+        // Check if the data matches what we just wrote
+        if (freshData.status === updatePayload.status && 
+            Array.isArray(freshData.questions) && 
+            freshData.questions.length === questions.length) {
+          verifyData = freshData;
+          console.log(`[UPDATE SESSION] Verification successful on attempt ${attempt + 1}`);
+          break;
+        } else {
+          console.log(`[UPDATE SESSION] Verification mismatch - expected status: ${updatePayload.status}, got: ${freshData.status}, expected questions: ${questions.length}, got: ${freshData.questions?.length || 0}`);
+        }
+      }
+    }
+    
+    // Use verified data if available, otherwise use the update response
+    if (verifyData) {
+      console.log(`[UPDATE SESSION] Using verified data from fresh read`);
+      // Replace data with verifyData for mapping
+      Object.assign(data, verifyData);
+    } else {
+      console.log(`[UPDATE SESSION] Warning: Could not verify update, using update response data`);
+    }
+  }
 
   logger.debug('Supabase update response', {
     sessionId: id,
