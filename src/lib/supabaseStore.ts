@@ -130,6 +130,13 @@ export async function updateSession(
   // Build update payload - ensure questions is always an array
   const questions = Array.isArray(updated.questions) ? updated.questions : [];
 
+  logger.info('Updating session in Supabase', { 
+    sessionId: id, 
+    status: updated.status, 
+    questionCount: questions.length,
+    currentQuestionIndex: updated.currentQuestionIndex 
+  });
+
   const updatePayload: any = {
     status: updated.status,
     resume_text: updated.resumeText || '',
@@ -162,16 +169,32 @@ export async function updateSession(
     .single();
 
   if (error) {
-    logger.error('Error updating session', new Error(error.message), { sessionId: id, errorCode: error.code });
+    logger.error('Error updating session', new Error(error.message), { 
+      sessionId: id, 
+      errorCode: error.code,
+      errorDetails: error,
+      updatePayload: { ...updatePayload, questions: `[${questions.length} questions]` }
+    });
     throw new Error(`Database update failed: ${error.message}`);
   }
 
   if (!data) {
-    logger.error('No data returned from Supabase update', undefined, { sessionId: id });
+    logger.error('No data returned from Supabase update', undefined, { 
+      sessionId: id,
+      updatePayload: { ...updatePayload, questions: `[${questions.length} questions]` }
+    });
     throw new Error('No data returned from update');
   }
 
-  return mapDbSessionToSession(data);
+  const mapped = mapDbSessionToSession(data);
+  logger.info('Session updated successfully in Supabase', { 
+    sessionId: id, 
+    status: mapped.status, 
+    questionCount: mapped.questions?.length || 0,
+    returnedQuestionCount: data.questions?.length || 0
+  });
+
+  return mapped;
 }
 
 export async function findSessionByShareToken(token: string): Promise<InterviewSession | null> {

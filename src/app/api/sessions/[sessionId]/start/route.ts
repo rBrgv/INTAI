@@ -136,6 +136,7 @@ export async function POST(
     logger.info("Questions generated successfully", { sessionId, questionCount: questions.length });
 
     // Update session with questions
+    logger.info("Updating session with questions", { sessionId, questionCount: questions.length });
     const updated = await updateSession(sessionId, (s) => ({
       ...s,
       status: "in_progress",
@@ -144,6 +145,7 @@ export async function POST(
     }));
 
     if (!updated) {
+      logger.error("updateSession returned null", undefined, { sessionId });
       return apiError(
         "Failed to update session",
         "Could not save questions to session",
@@ -151,14 +153,57 @@ export async function POST(
       );
     }
 
+    logger.info("Session updated, verifying questions were saved", { 
+      sessionId, 
+      updatedQuestionCount: updated.questions?.length || 0,
+      updatedStatus: updated.status 
+    });
+
     // Verify questions were saved
     if (!updated.questions || updated.questions.length === 0) {
+      logger.error("Questions not found in updated session", undefined, { 
+        sessionId,
+        hasQuestions: !!updated.questions,
+        questionsLength: updated.questions?.length
+      });
       return apiError(
         "Questions not saved",
         "Questions were not saved correctly to the session",
         500
       );
     }
+
+    // Double-check by fetching the session again to verify it was persisted
+    logger.info("Verifying session was persisted to database", { sessionId });
+    const verified = await getSession(sessionId);
+    if (!verified) {
+      logger.error("Session not found after update", undefined, { sessionId });
+      return apiError(
+        "Session verification failed",
+        "Session was not found after update",
+        500
+      );
+    }
+    
+    if (!verified.questions || verified.questions.length === 0) {
+      logger.error("Questions not found in verified session", undefined, { 
+        sessionId,
+        verifiedStatus: verified.status,
+        hasQuestions: !!verified.questions,
+        questionsLength: verified.questions?.length
+      });
+      return apiError(
+        "Questions not persisted",
+        "Questions were not persisted to the database",
+        500
+      );
+    }
+
+    logger.info("Session verified successfully", { 
+      sessionId, 
+      verifiedQuestionCount: verified.questions.length,
+      verifiedStatus: verified.status 
+    });
 
     await logAudit('interview_started', 'session', sessionId, {
       question_count: questions.length,
