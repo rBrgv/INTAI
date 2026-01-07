@@ -406,7 +406,11 @@ export default function InterviewClient({ sessionId }: { sessionId: string }) {
       setIsTyping(false);
     } catch (error) {
       const err = error instanceof Error ? error : new Error(String(error));
-      clientLogger.error("Failed to start interview after retries", err, { sessionId });
+      clientLogger.error("Failed to start interview after retries", err, { 
+        sessionId,
+        errorMessage: err.message,
+        errorStack: err.stack
+      });
       
       let errorMsg = "Failed to start interview. ";
       if (isRetryableError(error)) {
@@ -419,6 +423,8 @@ export default function InterviewClient({ sessionId }: { sessionId: string }) {
       addToast(errorMsg, "error");
       setLoading(false);
       setIsTyping(false);
+      
+      // Don't reset to show rules modal - keep the error visible
     }
   }
 

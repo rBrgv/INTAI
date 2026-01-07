@@ -161,6 +161,14 @@ export async function updateSession(
   if (updated.level !== undefined) updatePayload.level = updated.level;
 
   // Update in database
+  logger.debug('Executing Supabase update', { 
+    sessionId: id, 
+    table: TABLES.SESSIONS,
+    updatePayloadKeys: Object.keys(updatePayload),
+    questionsCount: questions.length,
+    status: updatePayload.status
+  });
+  
   const { data, error } = await supabase
     .from(TABLES.SESSIONS)
     .update(updatePayload)
@@ -169,21 +177,31 @@ export async function updateSession(
     .single();
 
   if (error) {
-    logger.error('Error updating session', new Error(error.message), { 
+    logger.error('Error updating session in Supabase', new Error(error.message), { 
       sessionId: id, 
       errorCode: error.code,
+      errorMessage: error.message,
       errorDetails: error,
-      updatePayload: { ...updatePayload, questions: `[${questions.length} questions]` }
+      errorHint: error.hint,
+      updatePayload: { 
+        ...updatePayload, 
+        questions: `[${questions.length} questions]`,
+        questionsPreview: questions.slice(0, 2).map(q => ({ id: q.id, text: q.text?.substring(0, 50) }))
+      }
     });
-    throw new Error(`Database update failed: ${error.message}`);
+    throw new Error(`Database update failed: ${error.message} (code: ${error.code})`);
   }
 
   if (!data) {
     logger.error('No data returned from Supabase update', undefined, { 
       sessionId: id,
-      updatePayload: { ...updatePayload, questions: `[${questions.length} questions]` }
+      updatePayload: { 
+        ...updatePayload, 
+        questions: `[${questions.length} questions]` 
+      },
+      note: 'This might indicate a RLS policy issue or the row was not found'
     });
-    throw new Error('No data returned from update');
+    throw new Error('No data returned from update - check RLS policies');
   }
 
   const mapped = mapDbSessionToSession(data);
