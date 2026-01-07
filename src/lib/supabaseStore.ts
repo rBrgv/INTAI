@@ -63,12 +63,18 @@ export async function getSession(id: string): Promise<InterviewSession | null> {
   }
 
   logger.debug('Querying Supabase for session', { sessionId: id, table: TABLES.SESSIONS });
+  console.log(`[GET SESSION] Querying session ${id}`);
   
   const { data, error } = await supabase
     .from(TABLES.SESSIONS)
     .select('*')
     .eq('id', id)
     .single();
+
+  // Log what we actually got from the database
+  if (data) {
+    console.log(`[GET SESSION] Retrieved from DB - status: ${data.status}, questions: ${data.questions?.length || 0}, questions type: ${typeof data.questions}, isArray: ${Array.isArray(data.questions)}, updated_at: ${data.updated_at}`);
+  }
 
   if (error) {
     // If error code is PGRST116, the row doesn't exist (not an error)
