@@ -35,6 +35,17 @@ export async function retryWithBackoff<T>(
         throw lastError;
       }
 
+      // Don't retry on client errors (4xx) - these are permanent errors
+      const status = (error as any)?.status;
+      if (status >= 400 && status < 500) {
+        throw lastError;
+      }
+
+      // Only retry if it's a retryable error
+      if (!isRetryableError(error)) {
+        throw lastError;
+      }
+
       // Calculate delay with exponential backoff
       const delay = Math.min(
         initialDelay * Math.pow(backoffMultiplier, attempt),

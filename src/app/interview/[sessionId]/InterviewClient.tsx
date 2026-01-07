@@ -345,6 +345,13 @@ export default function InterviewClient({ sessionId }: { sessionId: string }) {
             const json = await res.json().catch(() => ({}));
             const error = new Error(json.error || `Failed to start interview (${res.status})`);
             (error as any).status = res.status;
+            
+            // Don't retry on client errors (4xx) - these are permanent errors
+            if (res.status >= 400 && res.status < 500) {
+              throw error;
+            }
+            
+            // Only retry on server errors (5xx) or network issues
             throw error;
           }
           
@@ -354,8 +361,11 @@ export default function InterviewClient({ sessionId }: { sessionId: string }) {
           maxRetries: 3,
           initialDelay: 1000,
           onRetry: (attempt, error) => {
-            addToast(`Retrying... (attempt ${attempt}/3)`, "info");
-            clientLogger.error("Retrying start interview", error instanceof Error ? error : new Error(String(error)), { sessionId, attempt });
+            // Only show retry message for retryable errors
+            if (isRetryableError(error)) {
+              addToast(`Retrying... (attempt ${attempt}/3)`, "info");
+              clientLogger.info("Retrying start interview", { sessionId, attempt, error: error?.message });
+            }
           },
         }
       );
@@ -507,6 +517,13 @@ export default function InterviewClient({ sessionId }: { sessionId: string }) {
             const errorMsg = json.error || json.message || json.details || `Failed to submit answer (${res.status})`;
             const error = new Error(errorMsg);
             (error as any).status = res.status;
+            
+            // Don't retry on client errors (4xx) - these are permanent errors
+            if (res.status >= 400 && res.status < 500) {
+              throw error;
+            }
+            
+            // Only retry on server errors (5xx) or network issues
             throw error;
           }
 
