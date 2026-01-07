@@ -377,15 +377,15 @@ export default function InterviewClient({ sessionId }: { sessionId: string }) {
       
       // Wait a bit for database to update, then refresh
       await new Promise(resolve => setTimeout(resolve, 500));
+      
+      // Refresh and wait for it to complete
       await refresh();
       
-      // Verify that questions were loaded
-      if (!data?.questions || data.questions.length === 0) {
-        clientLogger.warn("Questions not found after refresh, retrying refresh", { sessionId });
-        // Try refreshing again after a longer delay
-        await new Promise(resolve => setTimeout(resolve, 1000));
-        await refresh();
-      }
+      // Wait a bit more for state to update, then check if we need to refresh again
+      await new Promise(resolve => setTimeout(resolve, 500));
+      
+      // Refresh one more time to ensure we have the latest data
+      await refresh();
       
       // Reset loading state after refresh
       setLoading(false);
