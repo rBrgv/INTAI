@@ -11,6 +11,8 @@ export async function POST(
   { params }: { params: { sessionId: string } }
 ) {
   const sessionId = params.sessionId;
+  // Use console.log here to ensure we see this even if logger level is wrong
+  console.log(`[START ENDPOINT] POST /api/sessions/${sessionId}/start called`);
   logger.info("Start interview request received", { sessionId });
   
   try {

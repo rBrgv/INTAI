@@ -113,19 +113,24 @@ export async function updateSession(
   id: string,
   updater: (s: InterviewSession) => InterviewSession
 ): Promise<InterviewSession | null> {
+  console.log(`[UPDATE SESSION] Called for session ${id}`);
   if (!isSupabaseConfigured() || !supabase) {
+    console.log(`[UPDATE SESSION] Supabase not configured`);
     return null;
   }
 
   // Get current session
   const current = await getSession(id);
   if (!current) {
+    console.log(`[UPDATE SESSION] Session not found: ${id}`);
     logger.error('Cannot update: session not found', undefined, { sessionId: id });
     return null;
   }
 
+  console.log(`[UPDATE SESSION] Current session status: ${current.status}, questions: ${current.questions?.length || 0}`);
   // Apply update
   const updated = updater(current);
+  console.log(`[UPDATE SESSION] After updater - status: ${updated.status}, questions: ${updated.questions?.length || 0}`);
 
   // Build update payload - ensure questions is always an array
   const questions = Array.isArray(updated.questions) ? updated.questions : [];
