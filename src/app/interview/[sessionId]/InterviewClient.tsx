@@ -237,6 +237,16 @@ export default function InterviewClient({ sessionId }: { sessionId: string }) {
     if (!res.ok) throw new Error(json.error || json.message || "Failed");
     // Handle standardized API response format
     const responseData = json.data || json;
+    
+    clientLogger.info("Refresh completed", { 
+      sessionId, 
+      hasQuestions: !!responseData?.questions, 
+      questionCount: responseData?.questions?.length || 0,
+      totalQuestions: responseData?.session?.totalQuestions || 0,
+      status: responseData?.session?.status,
+      hasCurrentQuestion: !!responseData?.currentQuestion
+    });
+    
     setData(responseData);
     setInitialLoading(false);
     setPresence(responseData.presence || null);
