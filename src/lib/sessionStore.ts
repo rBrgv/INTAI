@@ -48,3 +48,15 @@ export function getAllSessions(): InterviewSession[] {
   return Array.from(store.values());
 }
 
+export function getSessionsByMode(mode: string): InterviewSession[] {
+  return Array.from(store.values()).filter(s => s.mode === mode);
+}
+
+export function getSessionsByEmail(email: string): InterviewSession[] {
+  return Array.from(store.values()).filter(s => s.candidateEmail === email);
+}
+
+export function getSessionsByTemplate(templateId: string): InterviewSession[] {
+  return Array.from(store.values()).filter(s => s.collegeJobTemplateId === templateId);
+}
+

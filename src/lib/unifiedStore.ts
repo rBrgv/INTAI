@@ -7,7 +7,7 @@ import { isSupabaseConfigured } from './supabase';
 import * as supabaseStore from './supabaseStore';
 import * as memoryStore from './sessionStore';
 import * as memoryCollegeStore from './collegeStore';
-import { InterviewSession, CollegeJobTemplate, CandidateBatch } from './types';
+import { InterviewSession, CollegeJobTemplate, CandidateBatch, InterviewMode } from './types';
 import { logger } from './logger';
 
 // ============================================
@@ -211,6 +211,39 @@ export async function getAllSessions(): Promise<InterviewSession[]> {
     }
   }
   return memoryStore.getAllSessions();
+}
+
+export async function getSessionsByMode(mode: InterviewMode): Promise<InterviewSession[]> {
+  if (isSupabaseConfigured()) {
+    try {
+      return await supabaseStore.getSessionsByMode(mode);
+    } catch (error) {
+      logger.warn('Supabase getSessionsByMode failed, falling back to memory', { error: error instanceof Error ? error.message : String(error), mode });
+    }
+  }
+  return memoryStore.getSessionsByMode(mode);
+}
+
+export async function getSessionsByEmail(email: string): Promise<InterviewSession[]> {
+  if (isSupabaseConfigured()) {
+    try {
+      return await supabaseStore.getSessionsByEmail(email);
+    } catch (error) {
+      logger.warn('Supabase getSessionsByEmail failed, falling back to memory', { error: error instanceof Error ? error.message : String(error), email });
+    }
+  }
+  return memoryStore.getSessionsByEmail(email);
+}
+
+export async function getSessionsByTemplate(templateId: string): Promise<InterviewSession[]> {
+  if (isSupabaseConfigured()) {
+    try {
+      return await supabaseStore.getSessionsByTemplate(templateId);
+    } catch (error) {
+      logger.warn('Supabase getSessionsByTemplate failed, falling back to memory', { error: error instanceof Error ? error.message : String(error), templateId });
+    }
+  }
+  return memoryStore.getSessionsByTemplate(templateId);
 }
 
 // ============================================

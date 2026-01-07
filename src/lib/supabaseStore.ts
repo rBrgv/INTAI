@@ -236,6 +236,63 @@ export async function getAllSessions(): Promise<InterviewSession[]> {
   return (data || []).map(mapDbSessionToSession);
 }
 
+export async function getSessionsByMode(mode: string): Promise<InterviewSession[]> {
+  if (!isSupabaseConfigured() || !supabase) {
+    return [];
+  }
+
+  const { data, error } = await supabase
+    .from(TABLES.SESSIONS)
+    .select('*')
+    .eq('mode', mode)
+    .order('created_at', { ascending: false });
+
+  if (error) {
+    logger.error('Error getting sessions by mode', error instanceof Error ? error : new Error(String(error)), { mode });
+    return [];
+  }
+
+  return (data || []).map(mapDbSessionToSession);
+}
+
+export async function getSessionsByEmail(email: string): Promise<InterviewSession[]> {
+  if (!isSupabaseConfigured() || !supabase) {
+    return [];
+  }
+
+  const { data, error } = await supabase
+    .from(TABLES.SESSIONS)
+    .select('*')
+    .eq('candidate_email', email)
+    .order('created_at', { ascending: false });
+
+  if (error) {
+    logger.error('Error getting sessions by email', error instanceof Error ? error : new Error(String(error)), { email });
+    return [];
+  }
+
+  return (data || []).map(mapDbSessionToSession);
+}
+
+export async function getSessionsByTemplate(templateId: string): Promise<InterviewSession[]> {
+  if (!isSupabaseConfigured() || !supabase) {
+    return [];
+  }
+
+  const { data, error } = await supabase
+    .from(TABLES.SESSIONS)
+    .select('*')
+    .eq('college_job_template_id', templateId)
+    .order('created_at', { ascending: false });
+
+  if (error) {
+    logger.error('Error getting sessions by template', error instanceof Error ? error : new Error(String(error)), { templateId });
+    return [];
+  }
+
+  return (data || []).map(mapDbSessionToSession);
+}
+
 // Helper to map database row to InterviewSession
 function mapDbSessionToSession(row: any): InterviewSession {
   // Handle questions - Supabase JSONB returns as array or null

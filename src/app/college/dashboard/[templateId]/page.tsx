@@ -1,12 +1,12 @@
 import { notFound } from "next/navigation";
 import Link from "next/link";
-import { ArrowLeft } from "lucide-react";
+import { ArrowLeft, ExternalLink, FileText } from "lucide-react";
 import Container from "@/components/Container";
 import Card from "@/components/Card";
 import SectionTitle from "@/components/SectionTitle";
 import Badge from "@/components/Badge";
 import CohortAnalytics from "@/components/CohortAnalytics";
-import { getTemplate, getBatchesByTemplate, getSessionsByIds } from "@/lib/unifiedStore";
+import { getTemplate, getBatchesByTemplate, getSessionsByIds, getSessionsByTemplate } from "@/lib/unifiedStore";
 
 export default async function CollegeDashboardPage({
   params,
@@ -24,6 +24,10 @@ export default async function CollegeDashboardPage({
     (sum, batch) => sum + batch.candidates.filter(c => c.status === "completed").length,
     0
   );
+  
+  // Get all interview sessions for this template
+  const allSessions = await getSessionsByTemplate(params.templateId);
+  const sortedSessions = allSessions.sort((a, b) => b.createdAt - a.createdAt);
 
   return (
     <Container className="py-8">
@@ -172,6 +176,64 @@ export default async function CollegeDashboardPage({
                 )).flat()}
               </tbody>
             </table>
+          </div>
+        )}
+      </Card>
+
+      {/* All Interview Sessions */}
+      <Card className="app-card mt-6">
+        <h3 className="text-lg font-semibold text-[var(--text)] mb-4">All Interview Sessions</h3>
+        {sortedSessions.length === 0 ? (
+          <p className="text-sm text-[var(--muted)]">No interview sessions yet.</p>
+        ) : (
+          <div className="space-y-3">
+            {sortedSessions.map((session) => (
+              <div key={session.id} className="flex items-start justify-between gap-4 p-3 rounded-lg border border-[var(--border)] hover:bg-[var(--card)] transition-colors">
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-3 mb-2 flex-wrap">
+                    <h4 className="font-medium text-[var(--text)]">
+                      {session.candidateName || session.candidateEmail || "Unknown Candidate"}
+                    </h4>
+                    <Badge variant={session.status === "completed" ? "success" : session.status === "in_progress" ? "info" : "default"}>
+                      {session.status.replace("_", " ")}
+                    </Badge>
+                    {session.report && (
+                      <Badge variant="info" className="flex items-center gap-1">
+                        <FileText className="w-3 h-3" />
+                        Report
+                      </Badge>
+                    )}
+                  </div>
+                  <div className="text-sm text-[var(--muted)] space-y-1">
+                    {session.candidateEmail && <p>Email: {session.candidateEmail}</p>}
+                    {session.studentId && <p>Student ID: {session.studentId}</p>}
+                    <p>Created: {new Date(session.createdAt).toLocaleString()}</p>
+                    {session.scoreSummary && session.scoreSummary.countEvaluated > 0 && (
+                      <p>
+                        Score: <span className="font-semibold text-[var(--text)]">{session.scoreSummary.avg.overall.toFixed(1)}/10</span>
+                      </p>
+                    )}
+                  </div>
+                </div>
+                <div className="flex gap-2 flex-shrink-0">
+                  <Link
+                    href={`/interview/${session.id}?view=recruiter`}
+                    className="app-btn-primary px-3 py-1.5 text-sm flex items-center gap-1"
+                  >
+                    View <ExternalLink className="w-3 h-3" />
+                  </Link>
+                  {session.shareToken && (
+                    <Link
+                      href={`/share/${session.shareToken}`}
+                      className="app-btn-secondary px-3 py-1.5 text-sm"
+                      target="_blank"
+                    >
+                      Share
+                    </Link>
+                  )}
+                </div>
+              </div>
+            ))}
           </div>
         )}
       </Card>
