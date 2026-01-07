@@ -314,8 +314,10 @@ export default function InterviewClient({ sessionId }: { sessionId: string }) {
   }
 
   async function startInterview() {
+    clientLogger.info("startInterview function called", { sessionId });
     setError(null);
     setLoading(true);
+    setIsTyping(true);
     
     // Enter fullscreen mode when interview begins
     try {
@@ -331,10 +333,11 @@ export default function InterviewClient({ sessionId }: { sessionId: string }) {
       setFullScreenMode(true);
     } catch (error) {
       // Fullscreen request failed (user may have denied permission)
-      console.warn("Could not enter fullscreen:", error);
+      clientLogger.warn("Could not enter fullscreen", { error: error instanceof Error ? error.message : String(error) });
     }
     
     try {
+      clientLogger.info("Making POST request to start interview", { sessionId, url: `/api/sessions/${sessionId}/start` });
       const result = await retryWithBackoff(
         async () => {
           const res = await fetch(`/api/sessions/${sessionId}/start`, {
