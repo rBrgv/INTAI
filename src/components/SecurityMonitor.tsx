@@ -46,7 +46,7 @@ export function SecurityMonitor({ sessionId, enabled, onSecurityEvent }: Securit
           }
         } else {
           // Log if event failed to save
-          clientLogger.warn("Security event not logged", new Error(data.error || "Unknown error"), { sessionId, event, status: res.status });
+          clientLogger.warn("Security event not logged", { sessionId, event, status: res.status, error: data.error || "Unknown error" });
         }
       } catch (err) {
         clientLogger.error("Failed to log security event", err instanceof Error ? err : new Error(String(err)), { sessionId, event });
