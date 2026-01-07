@@ -324,6 +324,7 @@ export default function InterviewClient({ sessionId }: { sessionId: string }) {
   }
 
   async function startInterview() {
+    console.log(`[CLIENT] startInterview called for session ${sessionId}`);
     clientLogger.info("startInterview function called", { sessionId });
     setError(null);
     setLoading(true);
@@ -348,16 +349,24 @@ export default function InterviewClient({ sessionId }: { sessionId: string }) {
     
     try {
       const startUrl = `/api/sessions/${sessionId}/start`;
+      console.log(`[CLIENT] Making POST request to ${startUrl}`);
       clientLogger.info("Making POST request to start interview", { sessionId, url: startUrl });
       const result = await retryWithBackoff(
         async () => {
+          console.log(`[CLIENT] Fetching ${startUrl}...`);
           const res = await fetch(`/api/sessions/${sessionId}/start`, {
             method: "POST",
           });
           
-          const json = await res.json().catch(() => ({}));
+          console.log(`[CLIENT] Response status: ${res.status}`);
+          const json = await res.json().catch((e) => {
+            console.error(`[CLIENT] Failed to parse JSON:`, e);
+            return {};
+          });
+          console.log(`[CLIENT] Response JSON:`, json);
           
           if (!res.ok) {
+            console.error(`[CLIENT] Request failed with status ${res.status}:`, json);
             const error = new Error(json.error || json.message || `Failed to start interview (${res.status})`);
             (error as any).status = res.status;
             
@@ -387,9 +396,11 @@ export default function InterviewClient({ sessionId }: { sessionId: string }) {
         }
       );
       
+      console.log(`[CLIENT] Interview start API call successful:`, result);
       clientLogger.info("Interview start API call successful", { sessionId, result });
       
       // Wait a bit for database to update, then refresh
+      console.log(`[CLIENT] Waiting 500ms before refresh...`);
       await new Promise(resolve => setTimeout(resolve, 500));
       
       // Refresh and wait for it to complete
@@ -406,6 +417,7 @@ export default function InterviewClient({ sessionId }: { sessionId: string }) {
       setIsTyping(false);
     } catch (error) {
       const err = error instanceof Error ? error : new Error(String(error));
+      console.error(`[CLIENT] Failed to start interview:`, err);
       clientLogger.error("Failed to start interview after retries", err, { 
         sessionId,
         errorMessage: err.message,
