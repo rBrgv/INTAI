@@ -176,8 +176,10 @@ export async function POST(
     }
 
     // Double-check by fetching the session again to verify it was persisted
+    // Pass the updated_at timestamp to ensure we get fresh data (handles read replica lag)
     logger.info("Verifying session was persisted to database", { sessionId });
-    const verified = await getSession(sessionId);
+    const updatedAt = (updated as any).__updatedAt || updated.updatedAt;
+    const verified = await getSession(sessionId, updatedAt);
     if (!verified) {
       logger.error("Session not found after update", undefined, { sessionId });
       return apiError(

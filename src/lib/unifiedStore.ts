@@ -49,7 +49,7 @@ export async function createSession(session: InterviewSession): Promise<Intervie
   return created;
 }
 
-export async function getSession(id: string): Promise<InterviewSession | null> {
+export async function getSession(id: string, expectedUpdatedAt?: string): Promise<InterviewSession | null> {
   const isSupabaseAvailable = isSupabaseConfigured();
   logger.info('getSession called', { 
     sessionId: id, 

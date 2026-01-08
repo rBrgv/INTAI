@@ -56,24 +56,63 @@ export async function createSession(session: InterviewSession): Promise<Intervie
   return mapDbSessionToSession(data);
 }
 
-export async function getSession(id: string): Promise<InterviewSession | null> {
+export async function getSession(id: string, expectedUpdatedAt?: string): Promise<InterviewSession | null> {
   if (!isSupabaseConfigured() || !supabase) {
     logger.warn('Supabase not configured in getSession', { sessionId: id });
     return null;
   }
 
-  logger.debug('Querying Supabase for session', { sessionId: id, table: TABLES.SESSIONS });
-  console.log(`[GET SESSION] Querying session ${id}`);
+  logger.debug('Querying Supabase for session', { sessionId: id, table: TABLES.SESSIONS, expectedUpdatedAt });
+  console.log(`[GET SESSION] Querying session ${id}${expectedUpdatedAt ? ` (expecting updated_at >= ${expectedUpdatedAt})` : ''}`);
   
-  const { data, error } = await supabase
-    .from(TABLES.SESSIONS)
-    .select('*')
-    .eq('id', id)
-    .single();
-
-  // Log what we actually got from the database
-  if (data) {
-    console.log(`[GET SESSION] Retrieved from DB - status: ${data.status}, questions: ${data.questions?.length || 0}, questions type: ${typeof data.questions}, isArray: ${Array.isArray(data.questions)}, updated_at: ${data.updated_at}`);
+  // If we have an expected updated_at, retry until we get data that's at least that recent
+  // This handles read replica lag
+  let data = null;
+  let error = null;
+  const maxRetries = expectedUpdatedAt ? 5 : 1;
+  const retryDelay = 200; // 200ms between retries
+  
+  for (let attempt = 0; attempt < maxRetries; attempt++) {
+    if (attempt > 0) {
+      console.log(`[GET SESSION] Retry attempt ${attempt + 1}/${maxRetries} (read replica lag?)`);
+      await new Promise(resolve => setTimeout(resolve, retryDelay * attempt));
+    }
+    
+    const result = await supabase
+      .from(TABLES.SESSIONS)
+      .select('*')
+      .eq('id', id)
+      .single();
+    
+    error = result.error;
+    data = result.data;
+    
+    // Log what we actually got from the database
+    if (data) {
+      console.log(`[GET SESSION] Attempt ${attempt + 1} - status: ${data.status}, questions: ${data.questions?.length || 0}, updated_at: ${data.updated_at}`);
+      
+      // If we have an expected timestamp and this data is at least that recent, we're good
+      if (expectedUpdatedAt && data.updated_at) {
+        const dataTime = new Date(data.updated_at).getTime();
+        const expectedTime = new Date(expectedUpdatedAt).getTime();
+        if (dataTime >= expectedTime) {
+          console.log(`[GET SESSION] Got fresh data (${data.updated_at} >= ${expectedUpdatedAt})`);
+          break;
+        } else {
+          console.log(`[GET SESSION] Data is stale (${data.updated_at} < ${expectedUpdatedAt}), retrying...`);
+          continue;
+        }
+      } else {
+        // No expected timestamp, or no updated_at in data - use what we got
+        break;
+      }
+    } else if (error && error.code !== 'PGRST116') {
+      // Real error, don't retry
+      break;
+    } else {
+      // No data and no error (or PGRST116), break
+      break;
+    }
   }
 
   if (error) {
