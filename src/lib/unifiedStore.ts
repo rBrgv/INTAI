@@ -59,8 +59,8 @@ export async function getSession(id: string, expectedUpdatedAt?: string): Promis
   
   if (isSupabaseAvailable) {
     try {
-      logger.debug('Attempting to get session from Supabase', { sessionId: id });
-      const session = await supabaseStore.getSession(id);
+      logger.debug('Attempting to get session from Supabase', { sessionId: id, expectedUpdatedAt });
+      const session = await supabaseStore.getSession(id, expectedUpdatedAt);
       if (session) {
         logger.info('Session found in Supabase', { sessionId: id, status: session.status });
         return session;
