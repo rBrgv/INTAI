@@ -108,7 +108,15 @@ export async function getSession(id: string, expectedUpdatedAt?: string): Promis
         }
       }
       
-      // Check 2: If data looks suspiciously stale (status is "created" but updated_at is very recent)
+      // Check 2: If status is "created" with 0 questions, and we're within the first few retries,
+      // it might be stale data (especially if this is shortly after an update)
+      // We'll retry a few times to see if we get updated data
+      if (!shouldRetry && data.status === "created" && (!data.questions || data.questions.length === 0) && attempt < 3) {
+        console.log(`[GET SESSION] Status is 'created' with 0 questions, might be stale (attempt ${attempt + 1}), retrying...`);
+        shouldRetry = true;
+      }
+      
+      // Check 3: If data looks suspiciously stale (status is "created" but updated_at is very recent)
       // This suggests the session might have been updated but we're seeing old data
       if (!shouldRetry && data.status === "created" && data.updated_at) {
         const dataTime = new Date(data.updated_at).getTime();
