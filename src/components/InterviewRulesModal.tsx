@@ -45,8 +45,10 @@ export default function InterviewRulesModal({ sessionId, onAccept, onDecline }: 
   const canAccept = hasScrolled && readingTime >= MIN_READING_TIME;
 
   const handleAccept = () => {
+    console.log(`[CLIENT] Rules modal accepted for session ${sessionId}`);
     // Persist acceptance
     localStorage.setItem(`rulesAccepted:${sessionId}`, Date.now().toString());
+    console.log(`[CLIENT] Calling onAccept callback`);
     onAccept();
   };
 

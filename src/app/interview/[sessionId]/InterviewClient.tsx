@@ -1103,13 +1103,17 @@ export default function InterviewClient({ sessionId }: { sessionId: string }) {
               </p>
               <button
                 onClick={() => {
+                  console.log(`[CLIENT] Begin Interview button clicked for session ${sessionId}`);
                   // Check if rules were already accepted
                   const rulesAccepted = localStorage.getItem(`rulesAccepted:${sessionId}`);
+                  console.log(`[CLIENT] Rules accepted: ${rulesAccepted}`);
                   if (rulesAccepted) {
                     // Skip modal if already accepted
+                    console.log(`[CLIENT] Rules already accepted, calling startInterview directly`);
                     startInterview();
                   } else {
                     // Show modal if not accepted
+                    console.log(`[CLIENT] Rules not accepted, showing modal`);
                     setShowRulesModal(true);
                   }
                 }}
