@@ -65,12 +65,15 @@ export async function getSession(id: string, expectedUpdatedAt?: string): Promis
   logger.debug('Querying Supabase for session', { sessionId: id, table: TABLES.SESSIONS, expectedUpdatedAt });
   console.log(`[GET SESSION] Querying session ${id}${expectedUpdatedAt ? ` (expecting updated_at >= ${expectedUpdatedAt})` : ''}`);
   
-  // If we have an expected updated_at, retry until we get data that's at least that recent
-  // This handles read replica lag
+  // Retry mechanism to handle read replica lag
+  // We'll retry if:
+  // 1. We have an expectedUpdatedAt and the data is older
+  // 2. The data looks suspiciously stale (status is "created" but updated_at is recent, suggesting it might have been updated)
   let data = null;
   let error = null;
-  const maxRetries = expectedUpdatedAt ? 5 : 1;
+  const maxRetries = 5;
   const retryDelay = 200; // 200ms between retries
+  const maxStaleness = 10000; // 10 seconds - if updated_at is older than this, it's definitely stale
   
   for (let attempt = 0; attempt < maxRetries; attempt++) {
     if (attempt > 0) {
@@ -91,19 +94,36 @@ export async function getSession(id: string, expectedUpdatedAt?: string): Promis
     if (data) {
       console.log(`[GET SESSION] Attempt ${attempt + 1} - status: ${data.status}, questions: ${data.questions?.length || 0}, updated_at: ${data.updated_at}`);
       
-      // If we have an expected timestamp and this data is at least that recent, we're good
+      let shouldRetry = false;
+      
+      // Check 1: If we have an expected timestamp and this data is older, retry
       if (expectedUpdatedAt && data.updated_at) {
         const dataTime = new Date(data.updated_at).getTime();
         const expectedTime = new Date(expectedUpdatedAt).getTime();
-        if (dataTime >= expectedTime) {
-          console.log(`[GET SESSION] Got fresh data (${data.updated_at} >= ${expectedUpdatedAt})`);
-          break;
-        } else {
+        if (dataTime < expectedTime) {
           console.log(`[GET SESSION] Data is stale (${data.updated_at} < ${expectedUpdatedAt}), retrying...`);
-          continue;
+          shouldRetry = true;
+        } else {
+          console.log(`[GET SESSION] Got fresh data (${data.updated_at} >= ${expectedUpdatedAt})`);
         }
-      } else {
-        // No expected timestamp, or no updated_at in data - use what we got
+      }
+      
+      // Check 2: If data looks suspiciously stale (status is "created" but updated_at is very recent)
+      // This suggests the session might have been updated but we're seeing old data
+      if (!shouldRetry && data.status === "created" && data.updated_at) {
+        const dataTime = new Date(data.updated_at).getTime();
+        const now = Date.now();
+        const age = now - dataTime;
+        
+        // If the data was updated recently (within last 10 seconds) but status is still "created",
+        // it might be stale (unless it really is still "created")
+        if (age < maxStaleness && attempt < maxRetries - 1) {
+          console.log(`[GET SESSION] Data might be stale (status: created, but updated ${age}ms ago), retrying...`);
+          shouldRetry = true;
+        }
+      }
+      
+      if (!shouldRetry) {
         break;
       }
     } else if (error && error.code !== 'PGRST116') {
