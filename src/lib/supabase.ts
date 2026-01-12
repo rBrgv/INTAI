@@ -12,8 +12,21 @@ if (!supabaseUrl || !supabaseAnonKey) {
   }
 }
 
+// Create Supabase client with cache control disabled
 export const supabase = supabaseUrl && supabaseAnonKey
-  ? createClient(supabaseUrl, supabaseAnonKey)
+  ? createClient(supabaseUrl, supabaseAnonKey, {
+      db: {
+        schema: 'public',
+      },
+      global: {
+        // Disable caching to force fresh reads
+        headers: {
+          'Cache-Control': 'no-cache, no-store, must-revalidate',
+          'Pragma': 'no-cache',
+          'Expires': '0',
+        },
+      },
+    })
   : null;
 
 // Helper to check if Supabase is configured

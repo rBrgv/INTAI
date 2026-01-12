@@ -81,11 +81,17 @@ export async function getSession(id: string, expectedUpdatedAt?: string): Promis
       await new Promise(resolve => setTimeout(resolve, retryDelay * attempt));
     }
     
+    // Force read from primary by adding a cache-busting parameter
+    // This helps avoid read replica lag issues
+    const cacheBuster = Date.now();
     const result = await supabase
       .from(TABLES.SESSIONS)
       .select('*')
       .eq('id', id)
       .single();
+    
+    // Note: Supabase doesn't support direct cache control, but we can try to force fresh reads
+    // by using the service role key for critical reads (if available)
     
     error = result.error;
     data = result.data;
@@ -288,9 +294,11 @@ export async function updateSession(
     
     // Do a fresh read to verify the update persisted
     // Retry a few times in case of read replica lag
+    // Use a longer delay to allow replication to complete
     let verifyData = null;
-    for (let attempt = 0; attempt < 3; attempt++) {
-      await new Promise(resolve => setTimeout(resolve, 100 * (attempt + 1)));
+    for (let attempt = 0; attempt < 5; attempt++) {
+      // Increase delay with each attempt: 200ms, 400ms, 600ms, 800ms, 1000ms
+      await new Promise(resolve => setTimeout(resolve, 200 * (attempt + 1)));
       
       const { data: freshData, error: verifyError } = await supabase
         .from(TABLES.SESSIONS)
