@@ -7,11 +7,17 @@ import { logger } from './logger';
 // ============================================
 
 export async function createSession(session: InterviewSession): Promise<InterviewSession> {
-  if (!isSupabaseConfigured() || !supabase) {
+  if (!isSupabaseConfigured()) {
     throw new Error('Supabase not configured');
   }
 
-  const { data, error } = await supabase
+  // Use admin client for server-side operations to ensure consistency
+  const client = getSupabaseClient(true) || supabase;
+  if (!client) {
+    throw new Error('Supabase client not available');
+  }
+
+  const { data, error } = await client
     .from(TABLES.SESSIONS)
     .insert({
       id: session.id,
