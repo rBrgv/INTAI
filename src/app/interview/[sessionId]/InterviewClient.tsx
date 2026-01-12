@@ -399,17 +399,26 @@ export default function InterviewClient({ sessionId }: { sessionId: string }) {
       console.log(`[CLIENT] Interview start API call successful:`, result);
       clientLogger.info("Interview start API call successful", { sessionId, result });
       
-      // Wait a bit for database to update, then refresh
-      console.log(`[CLIENT] Waiting 500ms before refresh...`);
-      await new Promise(resolve => setTimeout(resolve, 500));
+      // Wait longer for database replication to complete (read replica lag)
+      console.log(`[CLIENT] Waiting 2 seconds for database replication...`);
+      await new Promise(resolve => setTimeout(resolve, 2000));
       
       // Refresh and wait for it to complete
+      console.log(`[CLIENT] First refresh...`);
       await refresh();
       
-      // Wait a bit more for state to update, then check if we need to refresh again
-      await new Promise(resolve => setTimeout(resolve, 500));
+      // Wait a bit more for state to update
+      console.log(`[CLIENT] Waiting 1 second before second refresh...`);
+      await new Promise(resolve => setTimeout(resolve, 1000));
       
       // Refresh one more time to ensure we have the latest data
+      console.log(`[CLIENT] Second refresh...`);
+      await refresh();
+      
+      // One final refresh after another delay
+      console.log(`[CLIENT] Waiting 1 second before final refresh...`);
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      console.log(`[CLIENT] Final refresh...`);
       await refresh();
       
       // Reset loading state after refresh
