@@ -12,20 +12,16 @@ if (!supabaseUrl || !supabaseAnonKey) {
   }
 }
 
-// Create Supabase client with cache control disabled
+// Create Supabase client
+// Note: For server-side operations, consider using service role key to bypass read replicas
+// For now, we use anon key and handle read replica lag with retries
 export const supabase = supabaseUrl && supabaseAnonKey
   ? createClient(supabaseUrl, supabaseAnonKey, {
       db: {
         schema: 'public',
       },
-      global: {
-        // Disable caching to force fresh reads
-        headers: {
-          'Cache-Control': 'no-cache, no-store, must-revalidate',
-          'Pragma': 'no-cache',
-          'Expires': '0',
-        },
-      },
+      // Add a query parameter to help with cache-busting (though Supabase doesn't cache at this level)
+      // The real issue is read replica lag, which we handle with retries
     })
   : null;
 
