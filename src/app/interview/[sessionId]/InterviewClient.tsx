@@ -601,7 +601,9 @@ export default function InterviewClient({ sessionId }: { sessionId: string }) {
       setShowConfirmDialog(false);
       
       // Update state immediately with the advanced index from response
+      // This ensures UI updates immediately even if refresh gets stale data
       if (responseData.advancedToIndex !== undefined && data) {
+        console.log(`[CLIENT] Updating state immediately - advancedToIndex: ${responseData.advancedToIndex}, status: ${responseData.status}`);
         setData({
           ...data,
           session: {
@@ -612,9 +614,35 @@ export default function InterviewClient({ sessionId }: { sessionId: string }) {
         });
       }
       
-      // Wait a bit for database to commit, then refresh to get full updated state
-      await new Promise(resolve => setTimeout(resolve, 300));
+      // Wait longer for database replication, then refresh to get full updated state
+      // Use longer delay to handle read replica lag
+      console.log(`[CLIENT] Waiting 2 seconds for database replication before refresh...`);
+      await new Promise(resolve => setTimeout(resolve, 2000));
+      
+      // Refresh to get full updated state (evaluation, score summary, etc.)
+      console.log(`[CLIENT] Refreshing session data...`);
       await refresh();
+      
+      // If refresh returned stale data, restore the correct index from the response
+      // This handles cases where read replica lag causes refresh to return old data
+      if (responseData.advancedToIndex !== undefined && data) {
+        setTimeout(() => {
+          setData((prevData) => {
+            if (prevData && prevData.session.currentQuestionIndex !== responseData.advancedToIndex) {
+              console.log(`[CLIENT] Refresh returned stale data (index: ${prevData.session.currentQuestionIndex}), restoring correct index: ${responseData.advancedToIndex}`);
+              return {
+                ...prevData,
+                session: {
+                  ...prevData.session,
+                  currentQuestionIndex: responseData.advancedToIndex,
+                  status: responseData.status || prevData.session.status,
+                },
+              };
+            }
+            return prevData;
+          });
+        }, 100);
+      }
       setTimeout(() => {
         setIsTyping(false);
         setLoading(false);
