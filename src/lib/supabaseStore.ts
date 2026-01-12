@@ -108,12 +108,23 @@ export async function getSession(id: string, expectedUpdatedAt?: string): Promis
         }
       }
       
-      // Check 2: If status is "created" with 0 questions, and we're within the first few retries,
-      // it might be stale data (especially if this is shortly after an update)
-      // We'll retry a few times to see if we get updated data
-      if (!shouldRetry && data.status === "created" && (!data.questions || data.questions.length === 0) && attempt < 3) {
-        console.log(`[GET SESSION] Status is 'created' with 0 questions, might be stale (attempt ${attempt + 1}), retrying...`);
-        shouldRetry = true;
+      // Check 2: If status is "created" with 0 questions, check if data might be stale
+      // This handles cases where the session was just updated but read replica hasn't caught up
+      if (!shouldRetry && data.status === "created" && (!data.questions || data.questions.length === 0)) {
+        // Check how old the data is - if it's very old, it's probably actually "created"
+        // But if it's recent (within last 2 minutes), it might be stale
+        const dataTime = new Date(data.updated_at).getTime();
+        const now = Date.now();
+        const age = now - dataTime;
+        
+        // If data is less than 2 minutes old, it might be stale (retry)
+        // If it's older, it's probably actually "created" (don't retry)
+        if (age < 120000 && attempt < maxRetries - 1) {
+          console.log(`[GET SESSION] Status is 'created' with 0 questions, data is ${Math.round(age/1000)}s old (might be stale), retrying...`);
+          shouldRetry = true;
+        } else if (age >= 120000) {
+          console.log(`[GET SESSION] Status is 'created' with 0 questions, but data is ${Math.round(age/1000)}s old (probably actually created), not retrying`);
+        }
       }
       
       // Check 3: If data looks suspiciously stale (status is "created" but updated_at is very recent)
@@ -123,10 +134,10 @@ export async function getSession(id: string, expectedUpdatedAt?: string): Promis
         const now = Date.now();
         const age = now - dataTime;
         
-        // If the data was updated recently (within last 10 seconds) but status is still "created",
+        // If the data was updated recently (within last 60 seconds) but status is still "created",
         // it might be stale (unless it really is still "created")
         if (age < maxStaleness && attempt < maxRetries - 1) {
-          console.log(`[GET SESSION] Data might be stale (status: created, but updated ${age}ms ago), retrying...`);
+          console.log(`[GET SESSION] Data might be stale (status: created, but updated ${Math.round(age/1000)}s ago), retrying...`);
           shouldRetry = true;
         }
       }
