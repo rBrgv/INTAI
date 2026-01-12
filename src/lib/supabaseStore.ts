@@ -294,8 +294,16 @@ export async function updateSession(
     });
   }
   
+  // Use admin client for updates to ensure consistency
+  const client = getSupabaseClient(true); // Use admin client for server-side operations
+  const updateClient = client || supabase;
+  if (!updateClient) {
+    logger.error('No Supabase client available for update', undefined, { sessionId: id });
+    return null;
+  }
+  
   // Use a fresh query to ensure we get the updated data
-  const { data, error, count } = await supabase
+  const { data, error, count } = await updateClient
     .from(TABLES.SESSIONS)
     .update(updatePayload)
     .eq('id', id)
