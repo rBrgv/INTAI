@@ -57,7 +57,7 @@ export async function createSession(session: InterviewSession): Promise<Intervie
 }
 
 export async function getSession(id: string, expectedUpdatedAt?: string): Promise<InterviewSession | null> {
-  if (!isSupabaseConfigured() || !supabase) {
+  if (!isSupabaseConfigured()) {
     logger.warn('Supabase not configured in getSession', { sessionId: id });
     return null;
   }
@@ -65,14 +65,24 @@ export async function getSession(id: string, expectedUpdatedAt?: string): Promis
   logger.debug('Querying Supabase for session', { sessionId: id, table: TABLES.SESSIONS, expectedUpdatedAt });
   console.log(`[GET SESSION] Querying session ${id}${expectedUpdatedAt ? ` (expecting updated_at >= ${expectedUpdatedAt})` : ''}`);
   
-  // Retry mechanism to handle read replica lag
-  // We'll retry if:
-  // 1. We have an expectedUpdatedAt and the data is older
-  // 2. The data looks suspiciously stale (status is "created" but updated_at is recent, suggesting it might have been updated)
+  // Use admin client for server-side reads to bypass read replicas
+  // This ensures we get fresh data immediately after updates
+  const client = getSupabaseClient(true); // Use admin client to bypass read replicas
+  if (!client) {
+    logger.warn('Supabase client not available, falling back to anon key', { sessionId: id });
+    // Fall back to regular client if admin not available
+    if (!supabase) {
+      return null;
+    }
+  }
+  
+  // Retry mechanism to handle read replica lag (if using anon key)
+  // If using admin key, we should get fresh data immediately, but still retry for safety
   let data = null;
   let error = null;
-  const maxRetries = 10; // Increased from 5 to handle severe read replica lag
-  const retryDelay = 500; // Increased from 200ms to 500ms between retries
+  const useAdmin = client !== supabase; // Check if we're using admin client
+  const maxRetries = useAdmin ? 3 : 10; // Fewer retries if using admin (should be fresh)
+  const retryDelay = useAdmin ? 100 : 500; // Shorter delay if using admin
   const maxStaleness = 60000; // 60 seconds - if updated_at is older than this, it's definitely stale
   
   for (let attempt = 0; attempt < maxRetries; attempt++) {
@@ -81,10 +91,8 @@ export async function getSession(id: string, expectedUpdatedAt?: string): Promis
       await new Promise(resolve => setTimeout(resolve, retryDelay * attempt));
     }
     
-    // Force read from primary by adding a cache-busting parameter
-    // This helps avoid read replica lag issues
-    const cacheBuster = Date.now();
-    const result = await supabase
+    // Use the appropriate client (admin for server-side, anon for client-side)
+    const result = await (client || supabase)!
       .from(TABLES.SESSIONS)
       .select('*')
       .eq('id', id)
