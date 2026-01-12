@@ -3,6 +3,10 @@ import { getSession } from "@/lib/unifiedStore";
 import { apiSuccess, apiError } from "@/lib/apiResponse";
 import { logger } from "@/lib/logger";
 
+// Disable caching to ensure fresh data (handles read replica lag)
+export const dynamic = 'force-dynamic';
+export const revalidate = 0;
+
 export async function GET(
   _req: Request,
   { params }: { params: { sessionId: string } }

@@ -1,4 +1,4 @@
-import { supabase, isSupabaseConfigured, TABLES } from './supabase';
+import { supabase, isSupabaseConfigured, TABLES, getSupabaseClient } from './supabase';
 import { InterviewSession, CollegeJobTemplate, CandidateBatch } from './types';
 import { logger } from './logger';
 
