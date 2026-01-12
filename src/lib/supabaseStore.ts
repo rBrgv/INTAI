@@ -71,9 +71,9 @@ export async function getSession(id: string, expectedUpdatedAt?: string): Promis
   // 2. The data looks suspiciously stale (status is "created" but updated_at is recent, suggesting it might have been updated)
   let data = null;
   let error = null;
-  const maxRetries = 5;
-  const retryDelay = 200; // 200ms between retries
-  const maxStaleness = 10000; // 10 seconds - if updated_at is older than this, it's definitely stale
+  const maxRetries = 10; // Increased from 5 to handle severe read replica lag
+  const retryDelay = 500; // Increased from 200ms to 500ms between retries
+  const maxStaleness = 60000; // 60 seconds - if updated_at is older than this, it's definitely stale
   
   for (let attempt = 0; attempt < maxRetries; attempt++) {
     if (attempt > 0) {
