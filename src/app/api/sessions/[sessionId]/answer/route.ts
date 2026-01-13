@@ -9,6 +9,10 @@ import { apiSuccess, apiError } from "@/lib/apiResponse";
 import { sanitizeForStorage } from "@/lib/sanitize";
 import { logger } from "@/lib/logger";
 
+// Disable caching to ensure fresh data (handles read replica lag)
+export const dynamic = 'force-dynamic';
+export const revalidate = 0;
+
 function clampInt(n: unknown, min: number, max: number) {
   const x = typeof n === "number" ? n : Number(n);
   if (!Number.isFinite(x)) return min;
