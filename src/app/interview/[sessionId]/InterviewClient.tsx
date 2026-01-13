@@ -399,27 +399,35 @@ export default function InterviewClient({ sessionId }: { sessionId: string }) {
       console.log(`[CLIENT] Interview start API call successful:`, result);
       clientLogger.info("Interview start API call successful", { sessionId, result });
       
+      // Detect production environment for longer delays
+      const isProduction = window.location.hostname !== 'localhost' && !window.location.hostname.includes('127.0.0.1');
+      const initialDelay = isProduction ? 3000 : 2000;
+      const refreshDelay = isProduction ? 1500 : 1000;
+      
       // Wait longer for database replication to complete (read replica lag)
-      console.log(`[CLIENT] Waiting 2 seconds for database replication...`);
-      await new Promise(resolve => setTimeout(resolve, 2000));
+      // Production typically has more read replica lag
+      console.log(`[CLIENT] Waiting ${initialDelay}ms for database replication... (production: ${isProduction})`);
+      await new Promise(resolve => setTimeout(resolve, initialDelay));
       
       // Refresh and wait for it to complete
       console.log(`[CLIENT] First refresh...`);
       await refresh();
       
       // Wait a bit more for state to update
-      console.log(`[CLIENT] Waiting 1 second before second refresh...`);
-      await new Promise(resolve => setTimeout(resolve, 1000));
+      console.log(`[CLIENT] Waiting ${refreshDelay}ms before second refresh...`);
+      await new Promise(resolve => setTimeout(resolve, refreshDelay));
       
       // Refresh one more time to ensure we have the latest data
       console.log(`[CLIENT] Second refresh...`);
       await refresh();
       
-      // One final refresh after another delay
-      console.log(`[CLIENT] Waiting 1 second before final refresh...`);
-      await new Promise(resolve => setTimeout(resolve, 1000));
-      console.log(`[CLIENT] Final refresh...`);
-      await refresh();
+      // One final refresh after another delay (only in production)
+      if (isProduction) {
+        console.log(`[CLIENT] Waiting ${refreshDelay}ms before final refresh (production)...`);
+        await new Promise(resolve => setTimeout(resolve, refreshDelay));
+        console.log(`[CLIENT] Final refresh...`);
+        await refresh();
+      }
       
       // Reset loading state after refresh
       setLoading(false);

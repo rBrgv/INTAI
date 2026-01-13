@@ -258,14 +258,39 @@ export async function POST(
     };
   });
 
-  if (updated) {
-    await logAudit('answer_evaluated', 'session', sessionId, {
-      question_id: currentQuestion.id,
-      overall_score: evaluation.overall,
-    });
+  if (!updated) {
+    logger.error("Failed to update session after answer submission", undefined, { sessionId });
+    return apiError(
+      "Failed to update session",
+      "Could not save answer and advance to next question",
+      500
+    );
   }
 
-  return apiSuccess(
+  // In production, verify the update was persisted before returning
+  // This helps ensure the client gets fresh data
+  const isProduction = process.env.NODE_ENV === 'production' || process.env.VERCEL_ENV === 'production';
+  if (isProduction) {
+    // Wait a bit for the update to propagate, then verify
+    await new Promise(resolve => setTimeout(resolve, 500));
+    const verified = await getSession(sessionId);
+    if (verified && verified.currentQuestionIndex !== updated.currentQuestionIndex) {
+      logger.warn("Session update verification failed - index mismatch", { 
+        sessionId,
+        expectedIndex: updated.currentQuestionIndex,
+        actualIndex: verified.currentQuestionIndex
+      });
+      // Still return success, but log the issue
+    }
+  }
+
+  await logAudit('answer_evaluated', 'session', sessionId, {
+    question_id: currentQuestion.id,
+    overall_score: evaluation.overall,
+  });
+
+  // Add cache-busting headers to prevent stale responses
+  const response = apiSuccess(
     {
       evaluation,
       scoreSummary: updated?.scoreSummary,
@@ -274,6 +299,12 @@ export async function POST(
     },
     "Answer submitted and evaluated successfully"
   );
+  
+  response.headers.set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+  response.headers.set('Pragma', 'no-cache');
+  response.headers.set('Expires', '0');
+  
+  return response;
 }
 
 

@@ -84,11 +84,18 @@ export async function getSession(id: string, expectedUpdatedAt?: string): Promis
   
   // Retry mechanism to handle read replica lag (if using anon key)
   // If using admin key, we should get fresh data immediately, but still retry for safety
+  // In production, be more aggressive with retries due to higher read replica lag
+  const isProduction = process.env.NODE_ENV === 'production' || process.env.VERCEL_ENV === 'production';
   let data = null;
   let error = null;
   const useAdmin = client !== supabase; // Check if we're using admin client
-  const maxRetries = useAdmin ? 3 : 10; // Fewer retries if using admin (should be fresh)
-  const retryDelay = useAdmin ? 100 : 500; // Shorter delay if using admin
+  // In production, use more retries even with admin client (network latency, etc.)
+  const maxRetries = isProduction 
+    ? (useAdmin ? 5 : 15)  // Production: more retries
+    : (useAdmin ? 3 : 10); // Development: fewer retries
+  const retryDelay = isProduction
+    ? (useAdmin ? 200 : 600)  // Production: longer delays
+    : (useAdmin ? 100 : 500); // Development: shorter delays
   const maxStaleness = 60000; // 60 seconds - if updated_at is older than this, it's definitely stale
   
   for (let attempt = 0; attempt < maxRetries; attempt++) {
