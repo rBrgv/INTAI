@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { ArrowLeft, Check, X, Plus } from "lucide-react";
+import { ArrowLeft, Check, X, Plus, Copy, CheckCircle2, Download, ExternalLink } from "lucide-react";
 import Stepper from "@/components/Stepper";
 import Card from "@/components/Card";
 import Container from "@/components/Container";
