@@ -423,11 +423,6 @@ export default function InterviewClient({ sessionId }: { sessionId: string }) {
       console.log(`[CLIENT] Interview start API call successful:`, result);
       clientLogger.info("Interview start API call successful", { sessionId, result });
       
-      // Detect production environment for longer delays
-      const isProduction = window.location.hostname !== 'localhost' && !window.location.hostname.includes('127.0.0.1');
-      const initialDelay = isProduction ? 3000 : 2000;
-      const refreshDelay = isProduction ? 1500 : 1000;
-      
       // Wait longer for database replication to complete (read replica lag)
       // Production typically has more read replica lag
       console.log(`[CLIENT] Waiting ${initialDelay}ms for database replication... (production: ${isProduction})`);
