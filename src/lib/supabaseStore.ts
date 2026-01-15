@@ -182,11 +182,25 @@ export async function getSession(id: string, expectedUpdatedAt?: string): Promis
       if (!shouldRetry) {
         break;
       }
-    } else if (error && error.code !== 'PGRST116') {
+    } catch (timeoutError) {
+      if (timeoutError instanceof Error && timeoutError.message === 'Query timeout') {
+        logger.warn('Query timeout, retrying...', { sessionId: id, attempt: attempt + 1 });
+        if (attempt < maxRetries - 1) {
+          continue; // Retry on timeout
+        } else {
+          error = { message: 'Query timeout after retries', code: 'TIMEOUT' } as any;
+          break;
+        }
+      }
+      throw timeoutError; // Re-throw non-timeout errors
+    }
+    
+    // Handle errors from the query
+    if (error && error.code !== 'PGRST116') {
       // Real error, don't retry
       break;
-    } else {
-      // No data and no error (or PGRST116), break
+    } else if (!data && !error) {
+      // No data and no error, break
       break;
     }
   }
