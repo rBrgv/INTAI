@@ -351,9 +351,12 @@ export default function InterviewClient({ sessionId }: { sessionId: string }) {
       const startUrl = `/api/sessions/${sessionId}/start`;
       console.log(`[CLIENT] Making POST request to ${startUrl}`);
       clientLogger.info("Making POST request to start interview", { sessionId, url: startUrl });
-      // Detect production environment for timeout
+      
+      // Detect production environment for timeout and delays
       const isProduction = window.location.hostname !== 'localhost' && !window.location.hostname.includes('127.0.0.1');
       const timeout = isProduction ? 60000 : 30000; // 60s in prod, 30s in dev
+      const initialDelay = isProduction ? 3000 : 2000;
+      const refreshDelay = isProduction ? 1500 : 1000;
       
       const result = await retryWithBackoff(
         async () => {
