@@ -258,7 +258,10 @@ export async function POST(
   });
 
   const openai = getOpenAI();
-  const resp = await openai.chat.completions.create({
+  
+  // Add timeout for OpenAI call (25 seconds to leave buffer for other operations)
+  const openaiTimeout = 25000;
+  const openaiPromise = openai.chat.completions.create({
     model: "gpt-4o-mini",
     temperature: 0.2,
     response_format: { type: "json_object" } as any,
@@ -267,6 +270,24 @@ export async function POST(
       { role: "user", content: prompt },
     ],
   });
+
+  const timeoutPromise = new Promise<never>((_, reject) => {
+    setTimeout(() => reject(new Error('OpenAI API timeout')), openaiTimeout);
+  });
+
+  let resp;
+  try {
+    resp = await Promise.race([openaiPromise, timeoutPromise]);
+  } catch (error) {
+    if (error instanceof Error && error.message === 'OpenAI API timeout') {
+      return apiError(
+        "Request timeout",
+        "Report generation took too long. Please try again.",
+        504
+      );
+    }
+    throw error;
+  }
 
   const raw = resp.choices[0]?.message?.content ?? "";
   let parsed: any;
