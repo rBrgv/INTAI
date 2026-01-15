@@ -32,14 +32,19 @@ export async function GET(
     const enrichedCandidates = batch.candidates.map(candidate => {
       const session = candidate.sessionId ? sessionMap.get(candidate.sessionId) : null;
       
+      // Get completion time from last answer if session is completed
+      const completedAt = session?.status === 'completed' && session.answers.length > 0
+        ? session.answers[session.answers.length - 1]?.submittedAt
+        : candidate.completedAt;
+      
       return {
         ...candidate,
         // Use live status from session if available, otherwise use batch status
         status: session?.status || candidate.status || 'pending',
         // Get score if session is completed
         score: session?.status === 'completed' ? session.scoreSummary?.avg?.overall : undefined,
-        // Get completion time from session
-        completedAt: session?.status === 'completed' ? session.updatedAt : candidate.completedAt,
+        // Get completion time from last answer or candidate data
+        completedAt,
         // Get report if available
         hasReport: !!session?.report,
         shareToken: session?.shareToken,
