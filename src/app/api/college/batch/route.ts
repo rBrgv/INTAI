@@ -112,6 +112,12 @@ export async function POST(req: Request) {
     candidate_count: candidates.length,
   });
 
+  // Get base URL for full links
+  const baseUrl = process.env.NEXT_PUBLIC_APP_URL || 
+    (req.headers.get('origin') || req.headers.get('host') ? 
+      `${req.headers.get('x-forwarded-proto') || 'https'}://${req.headers.get('host') || 'localhost:3000'}` : 
+      'http://localhost:3000');
+
   return apiSuccess(
     {
       batchId,
@@ -119,7 +125,10 @@ export async function POST(req: Request) {
       candidateLinks: candidates.map((c: { email: string; name: string; studentId?: string }, i: number) => ({
         email: c.email,
         name: c.name,
-        link: `/interview/${sessionIds[i]}`,
+        studentId: c.studentId,
+        sessionId: sessionIds[i],
+        link: `${baseUrl}/interview/${sessionIds[i]}`,
+        relativeLink: `/interview/${sessionIds[i]}`,
       })),
     },
     "Batch created successfully",

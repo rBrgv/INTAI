@@ -35,6 +35,16 @@ export default function CollegePage() {
   const [batchId, setBatchId] = useState<string | null>(null);
   const [csvPasteText, setCsvPasteText] = useState("");
   const [uploadMethod, setUploadMethod] = useState<"file" | "paste">("file");
+  const [candidateLinks, setCandidateLinks] = useState<Array<{
+    email: string;
+    name: string;
+    studentId?: string;
+    sessionId: string;
+    link: string;
+    relativeLink: string;
+  }>>([]);
+  const [copiedIndex, setCopiedIndex] = useState<number | null>(null);
+  const [showLinks, setShowLinks] = useState(false);
   
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -291,10 +301,73 @@ export default function CollegePage() {
       return;
     }
 
-    setBatchId(data.data?.batchId || data.batchId);
+    const batchId = data.data?.batchId || data.batchId;
+    const links = data.data?.candidateLinks || data.candidateLinks || [];
+    
+    setBatchId(batchId);
+    setCandidateLinks(links);
+    setShowLinks(true);
+    setCurrentStep(6); // Stay on step 6 to show links
     localStorage.removeItem("collegeModeDraft");
-    // Dashboard removed - will be re-added with account system
-    // router.push(`/college/dashboard/${jobTemplateId}`);
+  };
+  
+  const copyLink = async (link: string, index: number) => {
+    try {
+      await navigator.clipboard.writeText(link);
+      setCopiedIndex(index);
+      setTimeout(() => setCopiedIndex(null), 2000);
+    } catch (err) {
+      clientLogger.error("Failed to copy link", err instanceof Error ? err : new Error(String(err)));
+    }
+  };
+  
+  const copyAllLinks = async () => {
+    const allLinksText = candidateLinks.map(c => `${c.name} (${c.email}): ${c.link}`).join('\n');
+    try {
+      await navigator.clipboard.writeText(allLinksText);
+      addToast("All links copied to clipboard!", "success");
+    } catch (err) {
+      clientLogger.error("Failed to copy all links", err instanceof Error ? err : new Error(String(err)));
+      addToast("Failed to copy links", "error");
+    }
+  };
+  
+  const exportToCsv = () => {
+    const csvContent = [
+      ['Name', 'Email', 'Student ID', 'Interview Link'].join(','),
+      ...candidateLinks.map(c => [
+        `"${c.name}"`,
+        `"${c.email}"`,
+        c.studentId ? `"${c.studentId}"` : '',
+        `"${c.link}"`
+      ].join(','))
+    ].join('\n');
+    
+    const blob = new Blob([csvContent], { type: 'text/csv' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `interview-links-${batchId || 'batch'}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    addToast("CSV exported successfully!", "success");
+  };
+  
+  const addToast = (message: string, type: "success" | "error" | "info" = "info") => {
+    // Simple toast implementation
+    const toast = document.createElement('div');
+    toast.className = `fixed top-4 right-4 px-4 py-2 rounded-lg shadow-lg z-50 ${
+      type === 'success' ? 'bg-green-500 text-white' :
+      type === 'error' ? 'bg-red-500 text-white' :
+      'bg-blue-500 text-white'
+    }`;
+    toast.textContent = message;
+    document.body.appendChild(toast);
+    setTimeout(() => {
+      toast.remove();
+    }, 3000);
   };
 
   return (
@@ -618,15 +691,15 @@ export default function CollegePage() {
           </div>
         )}
 
-        {currentStep === 6 && (
+        {currentStep === 6 && !showLinks && (
           <div className="space-y-4">
-            <h3 className="text-lg font-semibold text-[var(--text)]">Step 6: Send Interview Links</h3>
+            <h3 className="text-lg font-semibold text-[var(--text)]">Step 6: Generate Interview Links</h3>
             <p className="text-sm text-[var(--muted)]">
-              Generate interview sessions for all candidates and send them links.
+              Generate interview sessions for all candidates and get their unique links.
             </p>
             <div className="bg-[var(--bg)] rounded-lg p-4">
               <p className="text-sm text-[var(--text)] mb-2">
-                Ready to send links to <span className="font-semibold">{candidates.length}</span> candidates
+                Ready to generate links for <span className="font-semibold">{candidates.length}</span> candidates
               </p>
               <p className="text-xs text-[var(--muted)]">
                 Each candidate will receive a unique interview link based on the job template.
@@ -640,8 +713,138 @@ export default function CollegePage() {
                 disabled={loading || !jobTemplateId || candidates.length === 0}
                 className="app-btn-primary px-6 py-2.5 disabled:opacity-60"
               >
-                {loading ? "Generating..." : `Generate & Send Links (${candidates.length} candidates)`}
+                {loading ? "Generating..." : `Generate Links (${candidates.length} candidates)`}
               </button>
+            </div>
+          </div>
+        )}
+
+        {currentStep === 6 && showLinks && candidateLinks.length > 0 && (
+          <div className="space-y-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <h3 className="text-lg font-semibold text-[var(--text)]">Interview Links Generated</h3>
+                <p className="text-sm text-[var(--muted)]">
+                  Share these links with {candidateLinks.length} candidates
+                </p>
+              </div>
+              <div className="flex gap-2">
+                <button
+                  onClick={copyAllLinks}
+                  className="app-btn-secondary px-4 py-2 text-sm flex items-center gap-2"
+                >
+                  <Copy className="w-4 h-4" />
+                  Copy All
+                </button>
+                <button
+                  onClick={exportToCsv}
+                  className="app-btn-secondary px-4 py-2 text-sm flex items-center gap-2"
+                >
+                  <Download className="w-4 h-4" />
+                  Export CSV
+                </button>
+              </div>
+            </div>
+
+            <div className="bg-green-50 border border-green-200 rounded-lg p-4">
+              <p className="text-sm text-green-900 font-medium flex items-center gap-2">
+                <CheckCircle2 className="w-4 h-4" />
+                Successfully generated {candidateLinks.length} interview links
+              </p>
+              <p className="text-xs text-green-700 mt-1">
+                Batch ID: {batchId}
+              </p>
+            </div>
+
+            <div className="border border-[var(--border)] rounded-lg overflow-hidden">
+              <div className="bg-[var(--bg)] px-4 py-3 border-b border-[var(--border)]">
+                <p className="text-sm font-medium text-[var(--text)]">Candidate Links</p>
+              </div>
+              <div className="max-h-[500px] overflow-y-auto">
+                <table className="w-full">
+                  <thead className="bg-[var(--bg)] sticky top-0">
+                    <tr className="border-b border-[var(--border)]">
+                      <th className="px-4 py-2 text-left text-xs font-medium text-[var(--muted)]">Name</th>
+                      <th className="px-4 py-2 text-left text-xs font-medium text-[var(--muted)]">Email</th>
+                      <th className="px-4 py-2 text-left text-xs font-medium text-[var(--muted)]">Student ID</th>
+                      <th className="px-4 py-2 text-left text-xs font-medium text-[var(--muted)]">Link</th>
+                      <th className="px-4 py-2 text-left text-xs font-medium text-[var(--muted)]">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {candidateLinks.map((candidate, index) => (
+                      <tr key={index} className="border-b border-[var(--border)] hover:bg-[var(--bg)]">
+                        <td className="px-4 py-3 text-sm text-[var(--text)]">{candidate.name}</td>
+                        <td className="px-4 py-3 text-sm text-[var(--muted)]">{candidate.email}</td>
+                        <td className="px-4 py-3 text-sm text-[var(--muted)]">{candidate.studentId || '-'}</td>
+                        <td className="px-4 py-3 text-sm">
+                          <div className="flex items-center gap-2 max-w-md">
+                            <code className="text-xs bg-[var(--bg)] px-2 py-1 rounded truncate flex-1">
+                              {candidate.link}
+                            </code>
+                          </div>
+                        </td>
+                        <td className="px-4 py-3">
+                          <div className="flex items-center gap-2">
+                            <button
+                              onClick={() => copyLink(candidate.link, index)}
+                              className="p-1.5 hover:bg-[var(--bg)] rounded transition-colors"
+                              title="Copy link"
+                            >
+                              {copiedIndex === index ? (
+                                <CheckCircle2 className="w-4 h-4 text-green-600" />
+                              ) : (
+                                <Copy className="w-4 h-4 text-[var(--muted)]" />
+                              )}
+                            </button>
+                            <a
+                              href={candidate.link}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="p-1.5 hover:bg-[var(--bg)] rounded transition-colors"
+                              title="Open link"
+                            >
+                              <ExternalLink className="w-4 h-4 text-[var(--muted)]" />
+                            </a>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+              <p className="text-sm font-medium text-blue-900 mb-2">💡 Tips for Sharing</p>
+              <ul className="text-xs text-blue-700 space-y-1 list-disc list-inside">
+                <li>Copy individual links or use "Copy All" to get all links at once</li>
+                <li>Export to CSV to import into your email system or spreadsheet</li>
+                <li>Each candidate gets a unique link - share the correct link with each person</li>
+                <li>Links are active immediately and candidates can start their interview</li>
+              </ul>
+            </div>
+
+            <div className="flex gap-3">
+              <button
+                onClick={() => {
+                  setShowLinks(false);
+                  setCandidateLinks([]);
+                  setBatchId(null);
+                  setCandidates([]);
+                  setCurrentStep(1);
+                  setCompletedSteps([]);
+                }}
+                className="app-btn-secondary px-6 py-2.5"
+              >
+                Create New Batch
+              </button>
+              <Link
+                href={`/college/dashboard${batchId ? `?batch=${batchId}` : ''}`}
+                className="app-btn-primary px-6 py-2.5"
+              >
+                View Dashboard
+              </Link>
             </div>
           </div>
         )}
