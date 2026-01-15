@@ -60,10 +60,6 @@ export default function CollegePage() {
         setDifficultyCurve(parsed.difficultyCurve || "balanced");
         setJobTemplateId(parsed.jobTemplateId || null);
         setCandidates(parsed.candidates || []);
-        setBatchId(parsed.batchId || null);
-        setCsvPasteText(parsed.csvPasteText || "");
-        setUploadMethod(parsed.uploadMethod || "file");
-        setSuggestedSkills(parsed.suggestedSkills || []);
         setCurrentStep(parsed.currentStep || 1);
         setCompletedSteps(parsed.completedSteps || []);
       } catch (e) {
@@ -72,10 +68,10 @@ export default function CollegePage() {
     }
   }, []);
 
-  // Extract skills from JD when it changes
+  // Auto-extract skills when JD text changes
   useEffect(() => {
-    if (jdText.length >= 50 && currentStep === 1 && !isProcessingJd) {
-      const timer = setTimeout(async () => {
+    const extractSkills = async () => {
+      if (jdText.length >= 50 && currentStep === 1 && !isProcessingJd) {
         setIsExtractingSkills(true);
         try {
           const res = await fetch("/api/skills/extract", {
@@ -84,71 +80,51 @@ export default function CollegePage() {
             body: JSON.stringify({ jdText }),
           });
           const data = await res.json();
-          if (res.ok && data.data?.skills && Array.isArray(data.data.skills)) {
-            setSuggestedSkills(data.data.skills);
+          if (data.ok && data.data?.skills) {
+            setSuggestedSkills(data.data.skills.slice(0, 10));
           }
-        } catch (error) {
-          clientLogger.error("Failed to extract skills", error instanceof Error ? error : new Error(String(error)));
+        } catch (err) {
+          clientLogger.error("Failed to extract skills", err instanceof Error ? err : new Error(String(err)));
         } finally {
           setIsExtractingSkills(false);
         }
-      }, 2000); // Wait 2 seconds after user stops typing
-
-      return () => clearTimeout(timer);
-    } else if (jdText.length < 50) {
-      setSuggestedSkills([]);
-    }
+      }
+    };
+    extractSkills();
   }, [jdText, currentStep, isProcessingJd]);
 
-  // Function to add a suggested skill
-  const addSuggestedSkill = (skill: string) => {
-    if (topSkills.filter(s => s.trim()).length >= 5) return;
-    if (topSkills.some(s => s.trim().toLowerCase() === skill.toLowerCase())) return;
-    
-    const emptyIndex = topSkills.findIndex(s => !s.trim());
-    if (emptyIndex >= 0) {
-      const newSkills = [...topSkills];
-      newSkills[emptyIndex] = skill;
-      setTopSkills(newSkills);
-    } else {
-      setTopSkills([...topSkills, skill]);
-    }
-  };
-
+  // Save draft
   useEffect(() => {
-    localStorage.setItem("collegeModeDraft", JSON.stringify({
+    const draft = {
       jdText,
       topSkills,
       questionCount,
       difficultyCurve,
       jobTemplateId,
       candidates,
-      batchId,
-      csvPasteText,
-      uploadMethod,
-      suggestedSkills,
       currentStep,
       completedSteps,
-    }));
+    };
+    localStorage.setItem("collegeModeDraft", JSON.stringify(draft));
   }, [jdText, topSkills, questionCount, difficultyCurve, jobTemplateId, candidates, batchId, csvPasteText, uploadMethod, suggestedSkills, currentStep, completedSteps]);
 
   const handleNext = () => {
-    setError(null);
+    // Validate current step before proceeding
     if (currentStep === 1) {
-      if (isProcessingJd) {
-        setError("Please wait for text extraction to complete");
-        return;
-      }
       if (jdText.length < 50) {
-        setError("Job description must be at least 50 characters");
+        setError("Please enter a job description (at least 50 characters)");
         return;
       }
+      if (topSkills.filter(s => s.trim()).length < 1) {
+        setError("Please add at least one skill");
+        return;
+      }
+      // Auto-create template if not already created
+      if (!jobTemplateId) {
+        handleCreateTemplate();
+        return; // handleCreateTemplate will advance to next step
+      }
     }
-    if (currentStep === 2 && topSkills.filter(s => s.trim()).length < 1) {
-      setError("Please add at least 1 skill");
-      return;
-    }
-
     if (!completedSteps.includes(currentStep)) {
       setCompletedSteps([...completedSteps, currentStep]);
     }
@@ -171,20 +147,33 @@ export default function CollegePage() {
     }
   };
 
+  const addSuggestedSkill = (skill: string) => {
+    if (topSkills.filter(s => s.trim()).length < 5) {
+      setTopSkills([...topSkills.filter(s => s.trim()), skill.trim()]);
+    }
+  };
+
   const handleCreateTemplate = async () => {
+    if (jdText.length < 50) {
+      setError("Job description must be at least 50 characters");
+      return;
+    }
+    if (topSkills.filter(s => s.trim()).length < 1) {
+      setError("Please add at least 1 skill");
+      return;
+    }
+
     setError(null);
     setLoading(true);
-    
+
     const res = await fetch("/api/college/templates", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         jdText,
-        topSkills: topSkills.filter(s => s.trim()).slice(0, 5),
-        config: {
-          questionCount,
-          difficultyCurve,
-        },
+        topSkills: topSkills.filter(s => s.trim()),
+        questionCount,
+        difficultyCurve,
       }),
     });
 
@@ -199,9 +188,11 @@ export default function CollegePage() {
     }
 
     setJobTemplateId(data.data?.templateId || data.templateId);
-    if (!completedSteps.includes(4)) {
-      setCompletedSteps([...completedSteps, 4]);
+    if (!completedSteps.includes(1)) {
+      setCompletedSteps([...completedSteps, 1]);
     }
+    // Auto-advance to next step after template creation
+    setCurrentStep(2);
   };
 
   const parseCsvText = (text: string): Array<{email: string; name: string; studentId?: string}> => {
@@ -377,7 +368,6 @@ export default function CollegePage() {
           <ArrowLeft className="w-4 h-4" />
           <span>Back</span>
         </button>
-        {/* Dashboard removed - will be re-added with account system */}
       </div>
 
       <h2 className="text-2xl font-semibold text-[var(--text)] mb-2">College Mode Setup</h2>
@@ -394,207 +384,191 @@ export default function CollegePage() {
 
       <Card className="app-card">
         {currentStep === 1 && (
-          <div className="space-y-4">
-            <h3 className="text-lg font-semibold text-[var(--text)]">Step 1: Job Description</h3>
-            <FileUploadWithPreview
-              label="Job Description"
-              onTextChange={setJdText}
-              previewText={jdText}
-              onProcessingChange={setIsProcessingJd}
-            />
-            {error && <p className="text-sm text-[var(--danger)]">{error}</p>}
-            <button 
-              onClick={handleNext} 
-              disabled={isProcessingJd}
-              className="app-btn-primary px-6 py-2.5 disabled:opacity-60 disabled:cursor-not-allowed"
-            >
-              {isProcessingJd ? "Extracting text..." : "Next: Add Skills"}
-            </button>
-          </div>
-        )}
+          <div className="space-y-6">
+            <h3 className="text-lg font-semibold text-[var(--text)]">Step 1: Create Job Template</h3>
+            <p className="text-sm text-[var(--muted)]">
+              Set up your job template with description, skills, and interview configuration.
+            </p>
+            
+            {/* Job Description Section */}
+            <div className="space-y-4">
+              <h4 className="text-md font-medium text-[var(--text)]">Job Description</h4>
+              <FileUploadWithPreview
+                label="Job Description"
+                onTextChange={setJdText}
+                previewText={jdText}
+                onProcessingChange={setIsProcessingJd}
+              />
+            </div>
 
             {/* Top Skills Section */}
             <div className="space-y-4">
               <h4 className="text-md font-medium text-[var(--text)]">Top 5 Skills</h4>
-            <p className="text-sm text-[var(--muted)]">
-              Select from suggestions or add your own (max 5)
-            </p>
+              <p className="text-sm text-[var(--muted)]">
+                Select from suggestions or add your own (max 5)
+              </p>
 
-            {/* Suggested Skills Tags */}
-            {suggestedSkills.length > 0 && (
+              {/* Suggested Skills Tags */}
+              {suggestedSkills.length > 0 && (
+                <div className="space-y-2">
+                  <p className="text-xs font-medium text-[var(--muted)]">
+                    💡 Suggested from Job Description:
+                  </p>
+                  <div className="flex flex-wrap gap-2">
+                    {suggestedSkills.map((skill, idx) => {
+                      const isAdded = topSkills.some(s => s.trim().toLowerCase() === skill.toLowerCase());
+                      const isFull = topSkills.filter(s => s.trim()).length >= 5;
+                      
+                      return (
+                        <button
+                          key={idx}
+                          onClick={() => !isAdded && !isFull && addSuggestedSkill(skill)}
+                          disabled={isAdded || isFull}
+                          className={`px-3 py-1.5 rounded-full text-xs font-medium transition-all ${
+                            isAdded
+                              ? "bg-green-100 text-green-700 border border-green-300 cursor-not-allowed"
+                              : isFull
+                              ? "bg-slate-100 text-slate-400 border border-slate-200 cursor-not-allowed"
+                              : "bg-blue-50 text-blue-700 border border-blue-200 hover:bg-blue-100 hover:border-blue-300 cursor-pointer"
+                          }`}
+                        >
+                          {isAdded ? <Check className="w-3 h-3 inline mr-1" /> : <Plus className="w-3 h-3 inline mr-1" />}{skill}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
+              {/* Loading indicator */}
+              {isExtractingSkills && (
+                <div className="flex items-center gap-2 text-xs text-[var(--muted)]">
+                  <div className="w-4 h-4 border-2 border-[var(--primary)] border-t-transparent rounded-full animate-spin" />
+                  Analyzing job description for skills...
+                </div>
+              )}
+
+              {/* Manual Skill Inputs */}
               <div className="space-y-2">
                 <p className="text-xs font-medium text-[var(--muted)]">
-                  💡 Suggested from Job Description:
+                  Your Selected Skills:
                 </p>
-                <div className="flex flex-wrap gap-2">
-                  {suggestedSkills.map((skill, idx) => {
-                    const isAdded = topSkills.some(s => s.trim().toLowerCase() === skill.toLowerCase());
-                    const isFull = topSkills.filter(s => s.trim()).length >= 5;
-                    
-                    return (
-                      <button
-                        key={idx}
-                        onClick={() => !isAdded && !isFull && addSuggestedSkill(skill)}
-                        disabled={isAdded || isFull}
-                        className={`px-3 py-1.5 rounded-full text-xs font-medium transition-all ${
-                          isAdded
-                            ? "bg-green-100 text-green-700 border border-green-300 cursor-not-allowed"
-                            : isFull
-                            ? "bg-slate-100 text-slate-400 border border-slate-200 cursor-not-allowed"
-                            : "bg-blue-50 text-blue-700 border border-blue-200 hover:bg-blue-100 hover:border-blue-300 cursor-pointer"
-                        }`}
-                      >
-                        {isAdded ? <Check className="w-3 h-3 inline mr-1" /> : <Plus className="w-3 h-3 inline mr-1" />}{skill}
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-            )}
-
-            {/* Loading indicator */}
-            {isExtractingSkills && (
-              <div className="flex items-center gap-2 text-xs text-[var(--muted)]">
-                <div className="w-4 h-4 border-2 border-[var(--primary)] border-t-transparent rounded-full animate-spin" />
-                Analyzing job description for skills...
-              </div>
-            )}
-
-            {/* Manual Skill Inputs */}
-            <div className="space-y-2">
-              <p className="text-xs font-medium text-[var(--muted)]">
-                Your Selected Skills:
-              </p>
-              {topSkills.map((skill, i) => (
-                <div key={i} className="flex items-center gap-2">
-                  <input
-                    className="flex-1 app-input"
-                    value={skill}
-                    onChange={(e) => {
-                      const newSkills = [...topSkills];
-                      newSkills[i] = e.target.value;
-                      setTopSkills(newSkills);
-                    }}
-                    placeholder={`Skill ${i + 1} (e.g., React, Python, Leadership)`}
-                  />
-                  {skill.trim() && (
-                    <button
-                      onClick={() => {
-                        const newSkills = topSkills.filter((_, idx) => idx !== i);
-                        if (newSkills.length === 0) newSkills.push("");
+                {topSkills.map((skill, i) => (
+                  <div key={i} className="flex items-center gap-2">
+                    <input
+                      className="flex-1 app-input"
+                      value={skill}
+                      onChange={(e) => {
+                        const newSkills = [...topSkills];
+                        newSkills[i] = e.target.value;
                         setTopSkills(newSkills);
                       }}
-                      className="text-red-500 hover:text-red-700 px-2"
-                      title="Remove skill"
-                    >
-                      <X className="w-4 h-4" />
-                    </button>
-                  )}
-                </div>
-              ))}
+                      placeholder={`Skill ${i + 1} (e.g., React, Python, Leadership)`}
+                    />
+                    {skill.trim() && (
+                      <button
+                        onClick={() => {
+                          const newSkills = topSkills.filter((_, idx) => idx !== i);
+                          if (newSkills.length === 0) newSkills.push("");
+                          setTopSkills(newSkills);
+                        }}
+                        className="text-red-500 hover:text-red-700 px-2"
+                        title="Remove skill"
+                      >
+                        <X className="w-4 h-4" />
+                      </button>
+                    )}
+                  </div>
+                ))}
+              </div>
+              {topSkills.filter(s => s.trim()).length < 5 && (
+                <button
+                  onClick={() => setTopSkills([...topSkills, ""])}
+                  className="app-btn-secondary px-4 py-2 text-sm"
+                >
+                  + Add Another Skill
+                </button>
+              )}
             </div>
-            {topSkills.filter(s => s.trim()).length < 5 && (
-              <button
-                onClick={() => setTopSkills([...topSkills, ""])}
-                className="app-btn-secondary px-4 py-2 text-sm"
-              >
-                + Add Another Skill
-              </button>
-            )}
-            {error && <p className="text-sm text-[var(--danger)]">{error}</p>}
-            <div className="flex gap-3">
-              <button onClick={handleBack} className="app-btn-secondary px-6 py-2.5">Back</button>
-              <button onClick={handleNext} className="app-btn-primary px-6 py-2.5">
-                Next: Configure Interview
-              </button>
-            </div>
-          </div>
-        )}
 
             {/* Interview Configuration Section */}
             <div className="space-y-4">
               <h4 className="text-md font-medium text-[var(--text)]">Interview Configuration</h4>
-            <div>
-              <label className="block text-sm font-medium text-[var(--text)] mb-2">
-                Number of Questions
-              </label>
-              <select
-                className="w-full app-input"
-                value={questionCount}
-                onChange={(e) => setQuestionCount(Number(e.target.value) as any)}
-              >
-                <option value={5}>5 questions</option>
-                <option value={10}>10 questions</option>
-                <option value={15}>15 questions</option>
-                <option value={20}>20 questions</option>
-                <option value={25}>25 questions</option>
-              </select>
+              <div>
+                <label className="block text-sm font-medium text-[var(--text)] mb-2">
+                  Number of Questions
+                </label>
+                <select
+                  className="w-full app-input"
+                  value={questionCount}
+                  onChange={(e) => setQuestionCount(Number(e.target.value) as any)}
+                >
+                  <option value={5}>5 questions</option>
+                  <option value={10}>10 questions</option>
+                  <option value={15}>15 questions</option>
+                  <option value={20}>20 questions</option>
+                  <option value={25}>25 questions</option>
+                </select>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-[var(--text)] mb-2">
+                  Difficulty Curve
+                </label>
+                <select
+                  className="w-full app-input"
+                  value={difficultyCurve}
+                  onChange={(e) => setDifficultyCurve(e.target.value as any)}
+                >
+                  <option value="easy_to_hard">Easy to Hard (Progressive)</option>
+                  <option value="balanced">Balanced Mix</option>
+                  <option value="custom">Custom (configure later)</option>
+                </select>
+              </div>
             </div>
-            <div>
-              <label className="block text-sm font-medium text-[var(--text)] mb-2">
-                Difficulty Curve
-              </label>
-              <select
-                className="w-full app-input"
-                value={difficultyCurve}
-                onChange={(e) => setDifficultyCurve(e.target.value as any)}
-              >
-                <option value="easy_to_hard">Easy to Hard (Progressive)</option>
-                <option value="balanced">Balanced Mix</option>
-                <option value="custom">Custom (configure later)</option>
-              </select>
-            </div>
-            <div className="flex gap-3">
-              <button onClick={handleBack} className="app-btn-secondary px-6 py-2.5">Back</button>
-              <button onClick={handleNext} className="app-btn-primary px-6 py-2.5">
-                Next: Create Template
-              </button>
-            </div>
-          </div>
-        )}
 
-        {currentStep === 4 && (
-          <div className="space-y-4">
-            <h3 className="text-lg font-semibold text-[var(--text)]">Step 4: Create Job Template</h3>
-            <p className="text-sm text-[var(--muted)]">
-              Review your configuration and create the template. This will be reused for all candidates.
-            </p>
+            {/* Template Creation */}
             {jobTemplateId ? (
-              <div className="rounded-lg bg-green-50 border border-green-200 p-4">
-                <p className="text-sm text-green-900 font-medium flex items-center gap-2"><Check className="w-4 h-4" /> Template created successfully</p>
-                <p className="text-xs text-green-700 mt-1">Template ID: {jobTemplateId}</p>
+              <div className="bg-green-50 border border-green-200 rounded-lg p-4">
+                <p className="text-sm text-green-900 font-medium flex items-center gap-2">
+                  <Check className="w-4 h-4" />
+                  Template created successfully!
+                </p>
               </div>
             ) : (
-              <div className="space-y-3">
-                <div className="bg-[var(--bg)] rounded-lg p-4 text-sm space-y-2">
-                  <div><span className="font-medium">Questions:</span> {questionCount}</div>
-                  <div><span className="font-medium">Skills:</span> {topSkills.filter(s => s.trim()).join(", ") || "None"}</div>
-                  <div><span className="font-medium">Difficulty:</span> {difficultyCurve.replace("_", " ")}</div>
-                </div>
-                <button
-                  onClick={handleCreateTemplate}
-                  disabled={loading}
-                  className="app-btn-primary px-6 py-2.5 disabled:opacity-60"
-                >
-                  {loading ? "Creating..." : "Create Template"}
-                </button>
+              <div className="bg-[var(--bg)] rounded-lg p-4 space-y-2 text-sm">
+                <p className="font-medium text-[var(--text)]">Review Summary:</p>
+                <div><span className="font-medium">Questions:</span> {questionCount}</div>
+                <div><span className="font-medium">Skills:</span> {topSkills.filter(s => s.trim()).join(", ") || "None"}</div>
+                <div><span className="font-medium">Difficulty:</span> {difficultyCurve.replace("_", " ")}</div>
               </div>
             )}
+            
             {error && <p className="text-sm text-[var(--danger)]">{error}</p>}
-            <div className="flex gap-3">
+            <div className="flex gap-3 pt-4">
               <button onClick={handleBack} className="app-btn-secondary px-6 py-2.5">Back</button>
-              {jobTemplateId && (
-                <button onClick={handleNext} className="app-btn-primary px-6 py-2.5">
-                  Next: Upload Candidates
+              {!jobTemplateId ? (
+                <button
+                  onClick={handleCreateTemplate}
+                  disabled={loading || !jdText || topSkills.filter(s => s.trim()).length === 0}
+                  className="app-btn-primary px-6 py-2.5 disabled:opacity-60"
+                >
+                  {loading ? "Creating..." : "Create Template & Continue"}
+                </button>
+              ) : (
+                <button
+                  onClick={handleNext}
+                  className="app-btn-primary px-6 py-2.5"
+                >
+                  Continue to Upload Candidates
                 </button>
               )}
             </div>
           </div>
         )}
 
-        {currentStep === 5 && (
+        {currentStep === 2 && (
           <div className="space-y-4">
-            <h3 className="text-lg font-semibold text-[var(--text)]">Step 5: Upload Candidate List</h3>
+            <h3 className="text-lg font-semibold text-[var(--text)]">Step 2: Upload Candidate List</h3>
             <p className="text-sm text-[var(--muted)]">
               Upload a CSV file or paste CSV data with columns: <code className="bg-[var(--bg)] px-1 rounded">email</code>, <code className="bg-[var(--bg)] px-1 rounded">name</code>, <code className="bg-[var(--bg)] px-1 rounded">studentId</code> (optional)
             </p>
@@ -681,7 +655,7 @@ export default function CollegePage() {
               <button onClick={handleBack} className="app-btn-secondary px-6 py-2.5">Back</button>
               {candidates.length > 0 && (
                 <button onClick={handleNext} className="app-btn-primary px-6 py-2.5">
-                  Next: Send Links
+                  Next: Generate Links
                 </button>
               )}
             </div>
@@ -849,4 +823,3 @@ export default function CollegePage() {
     </Container>
   );
 }
-
