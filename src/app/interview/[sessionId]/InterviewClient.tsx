@@ -601,28 +601,37 @@ export default function InterviewClient({ sessionId }: { sessionId: string }) {
             
             clearTimeout(timeoutId);
 
-          const json = (await res.json().catch(() => ({}))) as Partial<EvalResp> & {
-            error?: string;
-            message?: string;
-            details?: string;
-            data?: any;
-          };
+            const json = (await res.json().catch(() => ({}))) as Partial<EvalResp> & {
+              error?: string;
+              message?: string;
+              details?: string;
+              data?: any;
+            };
 
-          if (!res.ok) {
-            const errorMsg = json.error || json.message || json.details || `Failed to submit answer (${res.status})`;
-            const error = new Error(errorMsg);
-            (error as any).status = res.status;
-            
-            // Don't retry on client errors (4xx) - these are permanent errors
-            if (res.status >= 400 && res.status < 500) {
+            if (!res.ok) {
+              const errorMsg = json.error || json.message || json.details || `Failed to submit answer (${res.status})`;
+              const error = new Error(errorMsg);
+              (error as any).status = res.status;
+              
+              // Don't retry on client errors (4xx) - these are permanent errors
+              if (res.status >= 400 && res.status < 500) {
+                throw error;
+              }
+              
+              // Only retry on server errors (5xx) or network issues
               throw error;
             }
-            
-            // Only retry on server errors (5xx) or network issues
-            throw error;
-          }
 
-          return { res, json };
+            return { res, json };
+          } catch (fetchError: any) {
+            clearTimeout(timeoutId);
+            if (fetchError.name === 'AbortError') {
+              const timeoutError = new Error('Request timeout');
+              (timeoutError as any).status = 504;
+              throw timeoutError;
+            }
+            throw fetchError;
+          }
         },
         {
           maxRetries: 2, // Fewer retries for answer submission

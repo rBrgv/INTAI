@@ -129,58 +129,59 @@ export async function getSession(id: string, expectedUpdatedAt?: string): Promis
       
       // Log what we actually got from the database
       if (data) {
-      console.log(`[GET SESSION] Attempt ${attempt + 1} - status: ${data.status}, questions: ${data.questions?.length || 0}, updated_at: ${data.updated_at}`);
-      
-      let shouldRetry = false;
-      
-      // Check 1: If we have an expected timestamp and this data is older, retry
-      if (expectedUpdatedAt && data.updated_at) {
-        const dataTime = new Date(data.updated_at).getTime();
-        const expectedTime = new Date(expectedUpdatedAt).getTime();
-        if (dataTime < expectedTime) {
-          console.log(`[GET SESSION] Data is stale (${data.updated_at} < ${expectedUpdatedAt}), retrying...`);
-          shouldRetry = true;
-        } else {
-          console.log(`[GET SESSION] Got fresh data (${data.updated_at} >= ${expectedUpdatedAt})`);
-        }
-      }
-      
-      // Check 2: If status is "created" with 0 questions, check if data might be stale
-      // This handles cases where the session was just updated but read replica hasn't caught up
-      if (!shouldRetry && data.status === "created" && (!data.questions || data.questions.length === 0)) {
-        // Check how old the data is - if it's very old, it's probably actually "created"
-        // But if it's recent (within last 2 minutes), it might be stale
-        const dataTime = new Date(data.updated_at).getTime();
-        const now = Date.now();
-        const age = now - dataTime;
+        console.log(`[GET SESSION] Attempt ${attempt + 1} - status: ${data.status}, questions: ${data.questions?.length || 0}, updated_at: ${data.updated_at}`);
         
-        // If data is less than 2 minutes old, it might be stale (retry)
-        // If it's older, it's probably actually "created" (don't retry)
-        if (age < 120000 && attempt < maxRetries - 1) {
-          console.log(`[GET SESSION] Status is 'created' with 0 questions, data is ${Math.round(age/1000)}s old (might be stale), retrying...`);
-          shouldRetry = true;
-        } else if (age >= 120000) {
-          console.log(`[GET SESSION] Status is 'created' with 0 questions, but data is ${Math.round(age/1000)}s old (probably actually created), not retrying`);
-        }
-      }
-      
-      // Check 3: If data looks suspiciously stale (status is "created" but updated_at is very recent)
-      // This suggests the session might have been updated but we're seeing old data
-      if (!shouldRetry && data.status === "created" && data.updated_at) {
-        const dataTime = new Date(data.updated_at).getTime();
-        const now = Date.now();
-        const age = now - dataTime;
+        let shouldRetry = false;
         
-        // If the data was updated recently (within last 60 seconds) but status is still "created",
-        // it might be stale (unless it really is still "created")
-        if (age < maxStaleness && attempt < maxRetries - 1) {
-          console.log(`[GET SESSION] Data might be stale (status: created, but updated ${Math.round(age/1000)}s ago), retrying...`);
-          shouldRetry = true;
+        // Check 1: If we have an expected timestamp and this data is older, retry
+        if (expectedUpdatedAt && data.updated_at) {
+          const dataTime = new Date(data.updated_at).getTime();
+          const expectedTime = new Date(expectedUpdatedAt).getTime();
+          if (dataTime < expectedTime) {
+            console.log(`[GET SESSION] Data is stale (${data.updated_at} < ${expectedUpdatedAt}), retrying...`);
+            shouldRetry = true;
+          } else {
+            console.log(`[GET SESSION] Got fresh data (${data.updated_at} >= ${expectedUpdatedAt})`);
+          }
         }
-      }
-      
-      if (!shouldRetry) {
-        break;
+        
+        // Check 2: If status is "created" with 0 questions, check if data might be stale
+        // This handles cases where the session was just updated but read replica hasn't caught up
+        if (!shouldRetry && data.status === "created" && (!data.questions || data.questions.length === 0)) {
+          // Check how old the data is - if it's very old, it's probably actually "created"
+          // But if it's recent (within last 2 minutes), it might be stale
+          const dataTime = new Date(data.updated_at).getTime();
+          const now = Date.now();
+          const age = now - dataTime;
+          
+          // If data is less than 2 minutes old, it might be stale (retry)
+          // If it's older, it's probably actually "created" (don't retry)
+          if (age < 120000 && attempt < maxRetries - 1) {
+            console.log(`[GET SESSION] Status is 'created' with 0 questions, data is ${Math.round(age/1000)}s old (might be stale), retrying...`);
+            shouldRetry = true;
+          } else if (age >= 120000) {
+            console.log(`[GET SESSION] Status is 'created' with 0 questions, but data is ${Math.round(age/1000)}s old (probably actually created), not retrying`);
+          }
+        }
+        
+        // Check 3: If data looks suspiciously stale (status is "created" but updated_at is very recent)
+        // This suggests the session might have been updated but we're seeing old data
+        if (!shouldRetry && data.status === "created" && data.updated_at) {
+          const dataTime = new Date(data.updated_at).getTime();
+          const now = Date.now();
+          const age = now - dataTime;
+          
+          // If the data was updated recently (within last 60 seconds) but status is still "created",
+          // it might be stale (unless it really is still "created")
+          if (age < maxStaleness && attempt < maxRetries - 1) {
+            console.log(`[GET SESSION] Data might be stale (status: created, but updated ${Math.round(age/1000)}s ago), retrying...`);
+            shouldRetry = true;
+          }
+        }
+        
+        if (!shouldRetry) {
+          break;
+        }
       }
     } catch (timeoutError) {
       if (timeoutError instanceof Error && timeoutError.message === 'Query timeout') {
