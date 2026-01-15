@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { ArrowLeft, Calendar, Users, CheckCircle2, Clock, FileText, TrendingUp, ExternalLink } from "lucide-react";
@@ -33,7 +33,7 @@ type BatchStats = {
   averageScore: number;
 };
 
-export default function CollegeDashboardPage() {
+function CollegeDashboardContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const batchIdParam = searchParams.get('batch');
@@ -297,6 +297,23 @@ export default function CollegeDashboardPage() {
         </Card>
       </div>
     </Container>
+  );
+}
+
+export default function CollegeDashboardPage() {
+  return (
+    <Suspense fallback={
+      <Container className="py-8">
+        <div className="flex items-center justify-center min-h-[400px]">
+          <div className="text-center">
+            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-[var(--primary)] mx-auto mb-4"></div>
+            <p className="text-[var(--muted)]">Loading dashboard...</p>
+          </div>
+        </div>
+      </Container>
+    }>
+      <CollegeDashboardContent />
+    </Suspense>
   );
 }
 
