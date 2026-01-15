@@ -4,6 +4,11 @@ import { CandidateBatch, InterviewSession } from "@/lib/types";
 import { apiSuccess, apiError } from "@/lib/apiResponse";
 import { sanitizeForStorage } from "@/lib/sanitize";
 
+// Configure for production
+export const dynamic = 'force-dynamic';
+export const revalidate = 0;
+export const maxDuration = 30; // Batch creation should be fast
+
 function randomId() {
   return crypto.randomUUID();
 }

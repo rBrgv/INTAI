@@ -3,6 +3,11 @@ import { getSession, updateSession, logAudit } from "@/lib/unifiedStore";
 import { apiSuccess, apiError } from "@/lib/apiResponse";
 import { logger } from "@/lib/logger";
 
+// Configure for production
+export const dynamic = 'force-dynamic';
+export const revalidate = 0;
+export const maxDuration = 30; // Tab switch logging should be fast
+
 export async function POST(
   req: Request,
   { params }: { params: { sessionId: string } }

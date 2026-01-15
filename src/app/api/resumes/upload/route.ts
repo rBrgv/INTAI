@@ -4,6 +4,11 @@ import { logAudit } from "@/lib/unifiedStore";
 import { apiSuccess, apiError } from "@/lib/apiResponse";
 import { logger } from "@/lib/logger";
 
+// Configure for production
+export const dynamic = 'force-dynamic';
+export const revalidate = 0;
+export const maxDuration = 60; // File upload can take time
+
 export async function POST(req: Request) {
   // If Supabase is not configured, return a helpful error but don't block the user
   // The client-side component will handle this gracefully

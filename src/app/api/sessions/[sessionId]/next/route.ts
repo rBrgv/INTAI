@@ -2,6 +2,11 @@ import { NextResponse } from "next/server";
 import { getSession, updateSession, logAudit } from "@/lib/unifiedStore";
 import { apiSuccess, apiError } from "@/lib/apiResponse";
 
+// Configure for production
+export const dynamic = 'force-dynamic';
+export const revalidate = 0;
+export const maxDuration = 30; // Navigation should be fast
+
 export async function POST(
   _req: Request,
   { params }: { params: { sessionId: string } }

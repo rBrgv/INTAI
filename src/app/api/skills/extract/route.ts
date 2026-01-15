@@ -4,6 +4,11 @@ import { SkillsExtractSchema } from "@/lib/validators";
 import { apiSuccess, apiError } from "@/lib/apiResponse";
 import { logger } from "@/lib/logger";
 
+// Configure for production
+export const dynamic = 'force-dynamic';
+export const revalidate = 0;
+export const maxDuration = 30; // Skills extraction should be fast
+
 export async function POST(req: Request) {
   try {
     const body = await req.json().catch(() => null);
@@ -39,7 +44,9 @@ ${jdText}
 
 Return format: {"skills": ["Skill1", "Skill2", "Skill3", ...]}`;
 
-    const response = await getOpenAI().chat.completions.create({
+    // Add timeout for OpenAI call (20 seconds)
+    const openaiTimeout = 20000;
+    const openaiPromise = getOpenAI().chat.completions.create({
       model: "gpt-4o-mini",
       temperature: 0.3,
       response_format: { type: "json_object" } as any,
@@ -51,6 +58,25 @@ Return format: {"skills": ["Skill1", "Skill2", "Skill3", ...]}`;
         { role: "user", content: prompt },
       ],
     });
+
+    const timeoutPromise = new Promise<never>((_, reject) => {
+      setTimeout(() => reject(new Error('OpenAI API timeout')), openaiTimeout);
+    });
+
+    let response;
+    try {
+      response = await Promise.race([openaiPromise, timeoutPromise]);
+    } catch (error) {
+      if (error instanceof Error && error.message === 'OpenAI API timeout') {
+        logger.error("OpenAI API timeout during skills extraction", undefined, { timeout: openaiTimeout });
+        return apiError(
+          "Request timeout",
+          "Skills extraction took too long. Please try again.",
+          504
+        );
+      }
+      throw error;
+    }
 
     const content = response.choices[0]?.message?.content || "{}";
     let parsed: { skills?: string[] };

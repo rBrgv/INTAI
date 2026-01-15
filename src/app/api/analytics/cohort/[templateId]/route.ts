@@ -3,6 +3,11 @@ import { getTemplate, getBatchesByTemplate, getSessionsByIds } from "@/lib/unifi
 import { apiSuccess, apiError } from "@/lib/apiResponse";
 import { logger } from "@/lib/logger";
 
+// Configure for production
+export const dynamic = 'force-dynamic';
+export const revalidate = 0;
+export const maxDuration = 30; // Analytics should be fast
+
 export async function GET(
   _req: Request,
   { params }: { params: { templateId: string } }

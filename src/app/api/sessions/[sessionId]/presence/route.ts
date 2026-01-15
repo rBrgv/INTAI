@@ -3,6 +3,11 @@ import { getSession, updateSession } from "@/lib/unifiedStore";
 import { apiSuccess, apiError } from "@/lib/apiResponse";
 import { sanitizeForStorage } from "@/lib/sanitize";
 
+// Configure for production
+export const dynamic = 'force-dynamic';
+export const revalidate = 0;
+export const maxDuration = 30; // Presence check should be fast
+
 export async function GET(
   _req: Request,
   { params }: { params: { sessionId: string } }
