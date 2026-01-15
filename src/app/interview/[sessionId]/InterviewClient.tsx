@@ -351,36 +351,47 @@ export default function InterviewClient({ sessionId }: { sessionId: string }) {
       const startUrl = `/api/sessions/${sessionId}/start`;
       console.log(`[CLIENT] Making POST request to ${startUrl}`);
       clientLogger.info("Making POST request to start interview", { sessionId, url: startUrl });
+      // Detect production environment for timeout
+      const isProduction = window.location.hostname !== 'localhost' && !window.location.hostname.includes('127.0.0.1');
+      const timeout = isProduction ? 60000 : 30000; // 60s in prod, 30s in dev
+      
       const result = await retryWithBackoff(
         async () => {
           console.log(`[CLIENT] Fetching ${startUrl}...`);
-          const res = await fetch(`/api/sessions/${sessionId}/start`, {
-            method: "POST",
-          });
+          const controller = new AbortController();
+          const timeoutId = setTimeout(() => controller.abort(), timeout);
           
-          console.log(`[CLIENT] Response status: ${res.status}`);
-          const json = await res.json().catch((e) => {
-            console.error(`[CLIENT] Failed to parse JSON:`, e);
-            return {};
-          });
-          console.log(`[CLIENT] Response JSON:`, json);
-          
-          if (!res.ok) {
-            console.error(`[CLIENT] Request failed with status ${res.status}:`, json);
-            const error = new Error(json.error || json.message || `Failed to start interview (${res.status})`);
-            (error as any).status = res.status;
+          try {
+            const res = await fetch(`/api/sessions/${sessionId}/start`, {
+              method: "POST",
+              signal: controller.signal,
+            });
             
-            // Don't retry on client errors (4xx) - these are permanent errors
-            if (res.status >= 400 && res.status < 500) {
+            clearTimeout(timeoutId);
+            
+            console.log(`[CLIENT] Response status: ${res.status}`);
+            const json = await res.json().catch((e) => {
+              console.error(`[CLIENT] Failed to parse JSON:`, e);
+              return {};
+            });
+            console.log(`[CLIENT] Response JSON:`, json);
+            
+            if (!res.ok) {
+              console.error(`[CLIENT] Request failed with status ${res.status}:`, json);
+              const error = new Error(json.error || json.message || `Failed to start interview (${res.status})`);
+              (error as any).status = res.status;
+              
+              // Don't retry on client errors (4xx) - these are permanent errors
+              if (res.status >= 400 && res.status < 500) {
+                throw error;
+              }
+              
+              // Only retry on server errors (5xx) or network issues
               throw error;
             }
             
-            // Only retry on server errors (5xx) or network issues
-            throw error;
-          }
-          
-          // Parse the response
-          const responseData = json.data || json;
+            // Parse the response
+            const responseData = json.data || json;
             return responseData;
           } catch (fetchError: any) {
             clearTimeout(timeoutId);
