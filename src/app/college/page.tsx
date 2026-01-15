@@ -11,10 +11,7 @@ import FileUploadWithPreview from "@/components/FileUploadWithPreview";
 import { clientLogger } from "@/lib/clientLogger";
 
 const STEPS = [
-  { label: "Job Description", key: "jd" },
-  { label: "Top 5 Skills", key: "skills" },
-  { label: "Interview Setup", key: "config" },
-  { label: "Create Template", key: "create" },
+  { label: "Job Template", key: "template" },
   { label: "Upload Candidates", key: "candidates" },
   { label: "Send Links", key: "send" },
 ];
@@ -307,7 +304,7 @@ export default function CollegePage() {
     setBatchId(batchId);
     setCandidateLinks(links);
     setShowLinks(true);
-    setCurrentStep(6); // Stay on step 6 to show links
+    setCurrentStep(3); // Stay on step 3 to show links
     localStorage.removeItem("collegeModeDraft");
   };
   
@@ -416,9 +413,9 @@ export default function CollegePage() {
           </div>
         )}
 
-        {currentStep === 2 && (
-          <div className="space-y-4">
-            <h3 className="text-lg font-semibold text-[var(--text)]">Step 2: Top 5 Skills</h3>
+            {/* Top Skills Section */}
+            <div className="space-y-4">
+              <h4 className="text-md font-medium text-[var(--text)]">Top 5 Skills</h4>
             <p className="text-sm text-[var(--muted)]">
               Select from suggestions or add your own (max 5)
             </p>
@@ -514,9 +511,9 @@ export default function CollegePage() {
           </div>
         )}
 
-        {currentStep === 3 && (
-          <div className="space-y-4">
-            <h3 className="text-lg font-semibold text-[var(--text)]">Step 3: Interview Setup</h3>
+            {/* Interview Configuration Section */}
+            <div className="space-y-4">
+              <h4 className="text-md font-medium text-[var(--text)]">Interview Configuration</h4>
             <div>
               <label className="block text-sm font-medium text-[var(--text)] mb-2">
                 Number of Questions
@@ -691,9 +688,9 @@ export default function CollegePage() {
           </div>
         )}
 
-        {currentStep === 6 && !showLinks && (
+        {currentStep === 3 && !showLinks && (
           <div className="space-y-4">
-            <h3 className="text-lg font-semibold text-[var(--text)]">Step 6: Generate Interview Links</h3>
+            <h3 className="text-lg font-semibold text-[var(--text)]">Step 3: Generate Interview Links</h3>
             <p className="text-sm text-[var(--muted)]">
               Generate interview sessions for all candidates and get their unique links.
             </p>
@@ -719,7 +716,7 @@ export default function CollegePage() {
           </div>
         )}
 
-        {currentStep === 6 && showLinks && candidateLinks.length > 0 && (
+        {currentStep === 3 && showLinks && candidateLinks.length > 0 && (
           <div className="space-y-4">
             <div className="flex items-center justify-between">
               <div>
