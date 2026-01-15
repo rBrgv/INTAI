@@ -9,6 +9,8 @@ import { logger } from "@/lib/logger";
 // Disable caching to ensure fresh data (handles read replica lag)
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
+// Increase timeout for question generation (can take up to 60s)
+export const maxDuration = 60;
 
 export async function POST(
   _req: Request,
@@ -78,7 +80,7 @@ export async function POST(
 
     logger.info("Generating interview questions", { sessionId, questionCount, mode: existing.mode, hasJdText: !!jdText });
 
-    // Generate questions
+    // Generate questions with timeout wrapper
     const prompt = buildQuestionGenPrompt({
       mode: existing.mode,
       role: existing.role,
@@ -88,7 +90,9 @@ export async function POST(
       count: questionCount,
     });
 
-    const resp = await getOpenAI().chat.completions.create({
+    // Add timeout for OpenAI call (25 seconds to leave buffer for other operations)
+    const openaiTimeout = 25000;
+    const openaiPromise = getOpenAI().chat.completions.create({
       model: "gpt-4o-mini",
       temperature: 0.4,
       response_format: { type: "json_object" } as any,
@@ -97,6 +101,25 @@ export async function POST(
         { role: "user", content: prompt },
       ],
     });
+
+    const timeoutPromise = new Promise<never>((_, reject) => {
+      setTimeout(() => reject(new Error('OpenAI API timeout')), openaiTimeout);
+    });
+
+    let resp;
+    try {
+      resp = await Promise.race([openaiPromise, timeoutPromise]);
+    } catch (error) {
+      if (error instanceof Error && error.message === 'OpenAI API timeout') {
+        logger.error("OpenAI API timeout", undefined, { sessionId, timeout: openaiTimeout });
+        return apiError(
+          "Request timeout",
+          "Question generation took too long. Please try again.",
+          504
+        );
+      }
+      throw error;
+    }
 
     const raw = resp.choices[0]?.message?.content ?? "";
     if (!raw) {

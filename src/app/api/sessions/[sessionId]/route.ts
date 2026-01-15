@@ -6,6 +6,7 @@ import { logger } from "@/lib/logger";
 // Disable caching to ensure fresh data (handles read replica lag)
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
+export const maxDuration = 30; // Session retrieval should be fast
 
 export async function GET(
   _req: Request,

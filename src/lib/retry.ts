@@ -8,6 +8,7 @@ export type RetryOptions = {
   maxDelay?: number;
   backoffMultiplier?: number;
   onRetry?: (attempt: number, error: Error) => void;
+  timeout?: number; // Add timeout option
 };
 
 export async function retryWithBackoff<T>(
@@ -20,13 +21,24 @@ export async function retryWithBackoff<T>(
     maxDelay = 10000,
     backoffMultiplier = 2,
     onRetry,
+    timeout = 30000, // Default 30 second timeout
   } = options;
 
   let lastError: Error | null = null;
 
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     try {
-      return await fn();
+      // Add timeout wrapper if timeout is specified
+      if (timeout > 0) {
+        const timeoutPromise = new Promise<never>((_, reject) => {
+          setTimeout(() => reject(new Error('Request timeout')), timeout);
+        });
+        
+        const result = await Promise.race([fn(), timeoutPromise]);
+        return result;
+      } else {
+        return await fn();
+      }
     } catch (error) {
       lastError = error instanceof Error ? error : new Error(String(error));
 
@@ -38,6 +50,11 @@ export async function retryWithBackoff<T>(
       // Don't retry on client errors (4xx) - these are permanent errors
       const status = (error as any)?.status;
       if (status >= 400 && status < 500) {
+        throw lastError;
+      }
+
+      // Don't retry on timeout errors (they're not retryable)
+      if (error instanceof Error && error.message === 'Request timeout') {
         throw lastError;
       }
 

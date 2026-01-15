@@ -381,15 +381,25 @@ export default function InterviewClient({ sessionId }: { sessionId: string }) {
           
           // Parse the response
           const responseData = json.data || json;
-          return responseData;
+            return responseData;
+          } catch (fetchError: any) {
+            clearTimeout(timeoutId);
+            if (fetchError.name === 'AbortError') {
+              const timeoutError = new Error('Request timeout');
+              (timeoutError as any).status = 504;
+              throw timeoutError;
+            }
+            throw fetchError;
+          }
         },
         {
-          maxRetries: 3,
+          maxRetries: isProduction ? 3 : 2,
           initialDelay: 1000,
+          timeout: timeout,
           onRetry: (attempt, error) => {
             // Only show retry message for retryable errors
             if (isRetryableError(error)) {
-              addToast(`Retrying... (attempt ${attempt}/3)`, "info");
+              addToast(`Retrying... (attempt ${attempt}/${isProduction ? 3 : 2})`, "info");
               clientLogger.info("Retrying start interview", { sessionId, attempt, error: error?.message });
             }
           },
@@ -561,13 +571,24 @@ export default function InterviewClient({ sessionId }: { sessionId: string }) {
     }
 
     try {
+      // Detect production environment for timeout
+      const isProduction = window.location.hostname !== 'localhost' && !window.location.hostname.includes('127.0.0.1');
+      const timeout = isProduction ? 60000 : 30000; // 60s in prod, 30s in dev
+      
       const result = await retryWithBackoff(
         async () => {
-          const res = await fetch(`/api/sessions/${sessionId}/answer`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ answerText: answerText.trim() }),
-          });
+          const controller = new AbortController();
+          const timeoutId = setTimeout(() => controller.abort(), timeout);
+          
+          try {
+            const res = await fetch(`/api/sessions/${sessionId}/answer`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ answerText: answerText.trim() }),
+              signal: controller.signal,
+            });
+            
+            clearTimeout(timeoutId);
 
           const json = (await res.json().catch(() => ({}))) as Partial<EvalResp> & {
             error?: string;
@@ -658,14 +679,21 @@ export default function InterviewClient({ sessionId }: { sessionId: string }) {
       }, 500);
     } catch (error) {
       const err = error instanceof Error ? error : new Error(String(error));
-      const errorMsg = err.message || "Failed to submit answer. Please try again.";
+      let errorMsg = err.message || "Failed to submit answer. Please try again.";
+      
+      // Handle timeout specifically
+      if (err.message === 'Request timeout' || err.message.includes('timeout')) {
+        errorMsg = "Request timed out. Please try again.";
+      }
+      
       setError(errorMsg);
       addToast(errorMsg, "error");
       setIsTyping(false);
       setLoading(false);
       setIsSubmitting(false);
       clientLogger.error("Answer submission failed after retries", err, { 
-        sessionId
+        sessionId,
+        errorMessage: err.message
       });
     }
   }

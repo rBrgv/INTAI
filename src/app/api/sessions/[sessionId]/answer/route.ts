@@ -12,6 +12,8 @@ import { logger } from "@/lib/logger";
 // Disable caching to ensure fresh data (handles read replica lag)
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
+// Increase timeout for answer evaluation (can take up to 60s)
+export const maxDuration = 60;
 
 function clampInt(n: unknown, min: number, max: number) {
   const x = typeof n === "number" ? n : Number(n);
@@ -185,7 +187,10 @@ export async function POST(
   });
 
   const openai = getOpenAI();
-  const resp = await openai.chat.completions.create({
+  
+  // Add timeout for OpenAI call (25 seconds to leave buffer for other operations)
+  const openaiTimeout = 25000;
+  const openaiPromise = openai.chat.completions.create({
     model: "gpt-4o-mini",
     temperature: 0.2,
     // If your SDK/model supports JSON mode, this improves reliability:
@@ -195,6 +200,25 @@ export async function POST(
       { role: "user", content: prompt },
     ],
   });
+
+  const timeoutPromise = new Promise<never>((_, reject) => {
+    setTimeout(() => reject(new Error('OpenAI API timeout')), openaiTimeout);
+  });
+
+  let resp;
+  try {
+    resp = await Promise.race([openaiPromise, timeoutPromise]);
+  } catch (error) {
+    if (error instanceof Error && error.message === 'OpenAI API timeout') {
+      logger.error("OpenAI API timeout during answer evaluation", undefined, { sessionId, timeout: openaiTimeout });
+      return apiError(
+        "Request timeout",
+        "Answer evaluation took too long. Please try again.",
+        504
+      );
+    }
+    throw error;
+  }
 
   const raw = resp.choices[0]?.message?.content ?? "";
   let parsed: any;

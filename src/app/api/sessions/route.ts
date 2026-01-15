@@ -7,6 +7,11 @@ import { apiSuccess, apiError } from "@/lib/apiResponse";
 import { sanitizeForStorage } from "@/lib/sanitize";
 import { logger } from "@/lib/logger";
 
+// Configure for production
+export const dynamic = 'force-dynamic';
+export const revalidate = 0;
+export const maxDuration = 30; // Session creation should be fast
+
 // Handle CORS preflight requests
 export async function OPTIONS() {
   return new NextResponse(null, {

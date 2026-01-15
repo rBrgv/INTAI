@@ -98,27 +98,37 @@ export async function getSession(id: string, expectedUpdatedAt?: string): Promis
     : (useAdmin ? 100 : 500); // Development: shorter delays
   const maxStaleness = 60000; // 60 seconds - if updated_at is older than this, it's definitely stale
   
+  // Add query timeout (5 seconds max per query)
+  const queryTimeout = 5000;
+  
   for (let attempt = 0; attempt < maxRetries; attempt++) {
     if (attempt > 0) {
       console.log(`[GET SESSION] Retry attempt ${attempt + 1}/${maxRetries} (read replica lag?)`);
       await new Promise(resolve => setTimeout(resolve, retryDelay * attempt));
     }
     
-    // Use the appropriate client (admin for server-side, anon for client-side)
-    const result = await (client || supabase)!
-      .from(TABLES.SESSIONS)
-      .select('*')
-      .eq('id', id)
-      .single();
-    
-    // Note: Supabase doesn't support direct cache control, but we can try to force fresh reads
-    // by using the service role key for critical reads (if available)
-    
-    error = result.error;
-    data = result.data;
-    
-    // Log what we actually got from the database
-    if (data) {
+    try {
+      // Use the appropriate client (admin for server-side, anon for client-side)
+      const queryPromise = (client || supabase)!
+        .from(TABLES.SESSIONS)
+        .select('*')
+        .eq('id', id)
+        .single();
+      
+      const timeoutPromise = new Promise<never>((_, reject) => {
+        setTimeout(() => reject(new Error('Query timeout')), queryTimeout);
+      });
+      
+      const result = await Promise.race([queryPromise, timeoutPromise]);
+      
+      // Note: Supabase doesn't support direct cache control, but we can try to force fresh reads
+      // by using the service role key for critical reads (if available)
+      
+      error = result.error;
+      data = result.data;
+      
+      // Log what we actually got from the database
+      if (data) {
       console.log(`[GET SESSION] Attempt ${attempt + 1} - status: ${data.status}, questions: ${data.questions?.length || 0}, updated_at: ${data.updated_at}`);
       
       let shouldRetry = false;

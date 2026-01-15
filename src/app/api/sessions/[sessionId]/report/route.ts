@@ -5,6 +5,11 @@ import { buildReportPrompt } from "@/lib/prompts";
 import { InterviewReport } from "@/lib/types";
 import { apiSuccess, apiError } from "@/lib/apiResponse";
 
+// Configure for production
+export const dynamic = 'force-dynamic';
+export const revalidate = 0;
+export const maxDuration = 60; // Report generation can take time
+
 function clampInt(n: unknown, min: number, max: number) {
   const x = typeof n === "number" ? n : Number(n);
   if (!Number.isFinite(x)) return min;
