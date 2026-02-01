@@ -2,11 +2,6 @@ import { NextResponse } from "next/server";
 import { findSessionByShareToken, logAudit } from "@/lib/unifiedStore";
 import { apiSuccess, apiError } from "@/lib/apiResponse";
 
-// Configure for production
-export const dynamic = 'force-dynamic';
-export const revalidate = 0;
-export const maxDuration = 30; // Share token lookup should be fast
-
 export async function GET(
   _req: Request,
   { params }: { params: { token: string } }

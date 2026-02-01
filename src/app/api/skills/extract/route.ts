@@ -1,13 +1,12 @@
-import { NextResponse } from "next/server";
 import { getOpenAI } from "@/lib/openai";
 import { SkillsExtractSchema } from "@/lib/validators";
 import { apiSuccess, apiError } from "@/lib/apiResponse";
 import { logger } from "@/lib/logger";
 
-// Configure for production
-export const dynamic = 'force-dynamic';
-export const revalidate = 0;
-export const maxDuration = 30; // Skills extraction should be fast
+// Vercel serverless function configuration
+export const maxDuration = 30; // 30 seconds for OpenAI API calls
+export const dynamic = 'force-dynamic'; // Disable caching
+
 
 export async function POST(req: Request) {
   try {
@@ -25,9 +24,10 @@ export async function POST(req: Request) {
     const { jdText } = validationResult.data;
 
     if (!process.env.OPENAI_API_KEY) {
-      return NextResponse.json(
-        { error: "OPENAI_API_KEY not configured" },
-        { status: 500 }
+      return apiError(
+        "Configuration error",
+        "OPENAI_API_KEY is not configured",
+        500
       );
     }
 
@@ -44,9 +44,7 @@ ${jdText}
 
 Return format: {"skills": ["Skill1", "Skill2", "Skill3", ...]}`;
 
-    // Add timeout for OpenAI call (20 seconds)
-    const openaiTimeout = 20000;
-    const openaiPromise = getOpenAI().chat.completions.create({
+    const response = await getOpenAI().chat.completions.create({
       model: "gpt-4o-mini",
       temperature: 0.3,
       response_format: { type: "json_object" } as any,
@@ -59,28 +57,9 @@ Return format: {"skills": ["Skill1", "Skill2", "Skill3", ...]}`;
       ],
     });
 
-    const timeoutPromise = new Promise<never>((_, reject) => {
-      setTimeout(() => reject(new Error('OpenAI API timeout')), openaiTimeout);
-    });
-
-    let response;
-    try {
-      response = await Promise.race([openaiPromise, timeoutPromise]);
-    } catch (error) {
-      if (error instanceof Error && error.message === 'OpenAI API timeout') {
-        logger.error("OpenAI API timeout during skills extraction", undefined, { timeout: openaiTimeout });
-        return apiError(
-          "Request timeout",
-          "Skills extraction took too long. Please try again.",
-          504
-        );
-      }
-      throw error;
-    }
-
     const content = response.choices[0]?.message?.content || "{}";
     let parsed: { skills?: string[] };
-    
+
     try {
       const cleaned = content.replace(/```json\n?/g, "").replace(/```\n?/g, "").trim();
       parsed = JSON.parse(cleaned);
@@ -93,14 +72,14 @@ Return format: {"skills": ["Skill1", "Skill2", "Skill3", ...]}`;
       );
     }
 
-    const skills = Array.isArray(parsed.skills) 
+    const skills = Array.isArray(parsed.skills)
       ? parsed.skills.slice(0, 10).filter((s: string) => s && typeof s === 'string' && s.trim())
       : [];
 
-           return apiSuccess({ skills }, "Skills extracted successfully");
-         } catch (error) {
-           logger.error("Error extracting skills", error instanceof Error ? error : new Error(String(error)));
-           return apiError(
+    return apiSuccess({ skills }, "Skills extracted successfully");
+  } catch (error) {
+    logger.error("Error extracting skills", error instanceof Error ? error : new Error(String(error)));
+    return apiError(
       "Failed to extract skills",
       error instanceof Error ? error.message : "Unknown error",
       500

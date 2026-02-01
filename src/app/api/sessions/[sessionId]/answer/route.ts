@@ -7,13 +7,12 @@ import { InterviewEvaluation } from "@/lib/types";
 import { AnswerSubmitSchema } from "@/lib/validators";
 import { apiSuccess, apiError } from "@/lib/apiResponse";
 import { sanitizeForStorage } from "@/lib/sanitize";
-import { logger } from "@/lib/logger";
+import { invalidateCachedSession } from "@/lib/cache";
 
-// Disable caching to ensure fresh data (handles read replica lag)
-export const dynamic = 'force-dynamic';
-export const revalidate = 0;
-// Increase timeout for answer evaluation (can take up to 60s)
-export const maxDuration = 60;
+// Vercel serverless function configuration
+export const maxDuration = 60; // 60 seconds for OpenAI API calls
+export const dynamic = 'force-dynamic'; // Disable caching
+
 
 function clampInt(n: unknown, min: number, max: number) {
   const x = typeof n === "number" ? n : Number(n);
@@ -71,11 +70,8 @@ export async function POST(
   { params }: { params: { sessionId: string } }
 ) {
   const sessionId = params.sessionId;
-  logger.info("Answer submission request received", { sessionId });
-  
   const session = await getSession(sessionId);
   if (!session) {
-    logger.warn("Session not found for answer submission", { sessionId });
     return apiError("Session not found", "The requested session does not exist", 404);
   }
 
@@ -84,69 +80,46 @@ export async function POST(
     req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ||
     req.headers.get("x-real-ip") ||
     "unknown";
-  const rl = rateLimit({ key: `answer:${ip}`, limit: 30, windowMs: 60_000 });
+  const rl = rateLimit({
+    key: `answer:${ip}`,
+    limit: 30,
+    windowMs: 60_000,
+    blockAfterViolations: 5,
+    blockDurationMs: 15 * 60 * 1000, // 15 minutes
+  });
   if (!rl.ok) {
+    const message = rl.blocked
+      ? `Too many requests. Temporarily blocked until ${new Date(rl.blockedUntil || Date.now()).toLocaleTimeString()}.`
+      : "Too many requests. Please try again later.";
     return apiError(
       "Rate limit exceeded",
-      "Too many requests. Please try again later.",
-      429
+      message,
+      429,
+      {
+        remaining: rl.remaining,
+        resetAt: rl.resetAt,
+        blocked: rl.blocked,
+        blockedUntil: rl.blockedUntil,
+      }
     );
   }
 
   const body = await req.json().catch(() => null);
   if (!body) {
-    logger.warn("Invalid JSON in answer submission", { sessionId });
     return apiError("Invalid JSON", "Request body must be valid JSON", 400);
   }
-
-  logger.debug("Answer submission body received", { 
-    sessionId, 
-    hasAnswerText: !!body.answerText,
-    answerTextLength: body.answerText?.length || 0
-  });
 
   const validationResult = AnswerSubmitSchema.safeParse(body);
   if (!validationResult.success) {
     const errors = validationResult.error.issues.map(e => `${e.path.join('.')}: ${e.message}`).join(', ');
-    const answerLength = body.answerText?.length || 0;
-    const trimmedLength = body.answerText?.trim().length || 0;
-    logger.warn("Answer validation failed", { 
-      sessionId, 
-      errors, 
-      answerTextLength: answerLength,
-      trimmedLength: trimmedLength
-    });
-    
-    // Provide more helpful error message
-    let errorMessage = errors;
-    if (answerLength < 10) {
-      errorMessage = `Answer must be at least 10 characters (currently ${answerLength}${trimmedLength !== answerLength ? `, ${trimmedLength} after trimming` : ''})`;
-    }
-    
-    return apiError("Validation failed", errorMessage, 400);
+    return apiError("Validation failed", errors, 400);
   }
 
-  const { answerText: rawAnswerText } = validationResult.data;
-  
+  const { answerText: rawAnswerText, questionDisplayedAt } = validationResult.data;
   // Sanitize answer text before storing
-  let answerText: string;
-  try {
-    answerText = await sanitizeForStorage(rawAnswerText);
-  } catch (sanitizeError) {
-    logger.warn("Sanitization failed, using trimmed text", { 
-      sessionId,
-      error: sanitizeError instanceof Error ? sanitizeError.message : String(sanitizeError)
-    });
-    // Fallback to just trimming if sanitization fails
-    answerText = rawAnswerText.trim();
-  }
-  
-  logger.info("Answer validated and sanitized", { 
-    sessionId, 
-    originalLength: rawAnswerText.length, 
-    sanitizedLength: answerText.length 
-  });
+  const answerText = sanitizeForStorage(rawAnswerText);
 
+  // Get current question first (MUST be before usage)
   const currentQuestion = session.questions[session.currentQuestionIndex];
   if (!currentQuestion) {
     return apiError(
@@ -155,6 +128,17 @@ export async function POST(
       400
     );
   }
+
+  // Calculate timing and detect suspiciously fast answers
+  const now = Date.now();
+  const displayedAt = questionDisplayedAt ? Number(questionDisplayedAt) : (session.questionTimings?.find(qt => qt.questionId === currentQuestion.id)?.displayedAt || now);
+  const timeSpent = displayedAt > 0 ? Math.round((now - displayedAt) / 1000) : undefined; // Time in seconds
+
+  // Flag suspiciously fast answers based on difficulty
+  // Hard questions: < 10 seconds is suspicious
+  // Easy/Medium: < 5 seconds is suspicious
+  const minTimeThreshold = currentQuestion.difficulty === "hard" ? 10 : 5;
+  const isSuspiciouslyFast = timeSpent !== undefined && timeSpent < minTimeThreshold;
 
   // Prevent duplicate evaluation for same questionId (simple guard)
   const alreadyEval = session.evaluations.some(
@@ -187,10 +171,7 @@ export async function POST(
   });
 
   const openai = getOpenAI();
-  
-  // Add timeout for OpenAI call (25 seconds to leave buffer for other operations)
-  const openaiTimeout = 25000;
-  const openaiPromise = openai.chat.completions.create({
+  const resp = await openai.chat.completions.create({
     model: "gpt-4o-mini",
     temperature: 0.2,
     // If your SDK/model supports JSON mode, this improves reliability:
@@ -200,25 +181,6 @@ export async function POST(
       { role: "user", content: prompt },
     ],
   });
-
-  const timeoutPromise = new Promise<never>((_, reject) => {
-    setTimeout(() => reject(new Error('OpenAI API timeout')), openaiTimeout);
-  });
-
-  let resp;
-  try {
-    resp = await Promise.race([openaiPromise, timeoutPromise]);
-  } catch (error) {
-    if (error instanceof Error && error.message === 'OpenAI API timeout') {
-      logger.error("OpenAI API timeout during answer evaluation", undefined, { sessionId, timeout: openaiTimeout });
-      return apiError(
-        "Request timeout",
-        "Answer evaluation took too long. Please try again.",
-        504
-      );
-    }
-    throw error;
-  }
 
   const raw = resp.choices[0]?.message?.content ?? "";
   let parsed: any;
@@ -266,11 +228,20 @@ export async function POST(
       {
         questionId: currentQuestion.id,
         text: answerText,
-        submittedAt: Date.now(),
+        submittedAt: now,
+        timeSpent,
+        isSuspiciouslyFast,
       },
     ];
     const evaluations = [...s.evaluations, evaluation];
     const scoreSummary = computeSummary(evaluations);
+
+    // Update question timings
+    const questionTimings = (s.questionTimings || []).map(qt =>
+      qt.questionId === currentQuestion.id
+        ? { ...qt, answeredAt: now, timeSpent }
+        : qt
+    );
 
     // Auto-advance (until last question)
     const isLast = s.currentQuestionIndex >= s.questions.length - 1;
@@ -283,42 +254,24 @@ export async function POST(
       scoreSummary,
       currentQuestionIndex: nextIndex,
       status: isLast ? "completed" : s.status,
+      lastActivityAt: now,
+      questionTimings,
     };
   });
 
-  if (!updated) {
-    logger.error("Failed to update session after answer submission", undefined, { sessionId });
-    return apiError(
-      "Failed to update session",
-      "Could not save answer and advance to next question",
-      500
-    );
+  if (updated) {
+    await logAudit('answer_evaluated', 'session', sessionId, {
+      question_id: currentQuestion.id,
+      overall_score: evaluation.overall,
+      time_spent: timeSpent,
+      is_suspiciously_fast: isSuspiciouslyFast,
+    });
+
+    // Invalidate cache to ensure fresh data on next request
+    invalidateCachedSession(sessionId);
   }
 
-  // In production, verify the update was persisted before returning
-  // This helps ensure the client gets fresh data
-  const isProduction = process.env.NODE_ENV === 'production' || process.env.VERCEL_ENV === 'production';
-  if (isProduction) {
-    // Wait a bit for the update to propagate, then verify
-    await new Promise(resolve => setTimeout(resolve, 500));
-    const verified = await getSession(sessionId);
-    if (verified && verified.currentQuestionIndex !== updated.currentQuestionIndex) {
-      logger.warn("Session update verification failed - index mismatch", { 
-        sessionId,
-        expectedIndex: updated.currentQuestionIndex,
-        actualIndex: verified.currentQuestionIndex
-      });
-      // Still return success, but log the issue
-    }
-  }
-
-  await logAudit('answer_evaluated', 'session', sessionId, {
-    question_id: currentQuestion.id,
-    overall_score: evaluation.overall,
-  });
-
-  // Add cache-busting headers to prevent stale responses
-  const response = apiSuccess(
+  return apiSuccess(
     {
       evaluation,
       scoreSummary: updated?.scoreSummary,
@@ -327,12 +280,6 @@ export async function POST(
     },
     "Answer submitted and evaluated successfully"
   );
-  
-  response.headers.set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
-  response.headers.set('Pragma', 'no-cache');
-  response.headers.set('Expires', '0');
-  
-  return response;
 }
 
 

@@ -3,11 +3,6 @@ import { getSession, updateSession, logAudit } from "@/lib/unifiedStore";
 import { apiSuccess, apiError } from "@/lib/apiResponse";
 import { logger } from "@/lib/logger";
 
-// Configure for production
-export const dynamic = 'force-dynamic';
-export const revalidate = 0;
-export const maxDuration = 30; // Tab switch logging should be fast
-
 export async function POST(
   req: Request,
   { params }: { params: { sessionId: string } }
@@ -57,18 +52,10 @@ export async function POST(
       });
     }
 
-    // Return warning message based on switch count
-    let warning: string | null = null;
-    if (blurCount > 5) {
-      warning = "Excessive tab switching detected. Interview may be flagged.";
-    } else if (blurCount > 3) {
-      warning = "Multiple tab switches detected. Please stay focused.";
-    }
-
     return apiSuccess(
       {
         tabSwitchCount: blurCount,
-        warning,
+        warning: blurCount > 3 ? "Multiple tab switches detected" : null,
       },
       "Tab switch event logged"
     );

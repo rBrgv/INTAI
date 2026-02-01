@@ -7,38 +7,8 @@ import { apiSuccess, apiError } from "@/lib/apiResponse";
 import { sanitizeForStorage } from "@/lib/sanitize";
 import { logger } from "@/lib/logger";
 
-// Configure for production
-export const dynamic = 'force-dynamic';
-export const revalidate = 0;
-export const maxDuration = 30; // Session creation should be fast
-
-// Handle CORS preflight requests
-export async function OPTIONS() {
-  return new NextResponse(null, {
-    status: 200,
-    headers: {
-      'Access-Control-Allow-Origin': '*',
-      'Access-Control-Allow-Methods': 'POST, OPTIONS',
-      'Access-Control-Allow-Headers': 'Content-Type',
-    },
-  });
-}
-
 function randomId() {
   return crypto.randomUUID();
-}
-
-// Add GET handler for testing/debugging
-export async function GET() {
-  try {
-    return apiSuccess(
-      { message: "Sessions API endpoint is working", methods: ["POST", "OPTIONS", "GET"] },
-      "Sessions endpoint active",
-      200
-    );
-  } catch (error) {
-    return apiError("Internal server error", error instanceof Error ? error.message : "Unknown error", 500);
-  }
 }
 
 export async function POST(req: Request) {
@@ -58,136 +28,104 @@ export async function POST(req: Request) {
 
     const validated = validationResult.data;
     mode = validated.mode;
-    // Sanitize user inputs before storing (with error handling)
-    let resumeText: string;
-    try {
-      resumeText = await sanitizeForStorage(validated.resumeText);
-    } catch (sanitizeError) {
-      logger.warn("Sanitization failed, using raw text", { error: sanitizeError instanceof Error ? sanitizeError.message : String(sanitizeError) });
-      resumeText = String(validated.resumeText || '').trim();
-    }
-    
+    // Sanitize user inputs before storing
+    const resumeText = sanitizeForStorage(validated.resumeText);
     const resumeId = validated.resumeId;
-    let jobSetup: any = undefined;
-    if (validated.jobSetup) {
+    const jobSetup = validated.jobSetup ? {
+      ...validated.jobSetup,
+      jdText: validated.jobSetup.jdText ? sanitizeForStorage(validated.jobSetup.jdText) : undefined,
+      topSkills: validated.jobSetup.topSkills ? validated.jobSetup.topSkills.map(s => sanitizeForStorage(s)) : undefined,
+      resumeText: validated.jobSetup.resumeText ? sanitizeForStorage(validated.jobSetup.resumeText) : undefined,
+    } : undefined;
+
+    const session: InterviewSession = {
+      id: randomId(),
+      mode,
+      createdAt: Date.now(),
+      resumeText,
+      jdText: jobSetup?.jdText,
+      role: validated.role,
+      level: validated.level,
+      status: "created",
+      questions: [],
+      currentQuestionIndex: 0,
+      answers: [],
+      evaluations: [],
+      scoreSummary: {
+        countEvaluated: 0,
+        avg: { technical: 0, communication: 0, problemSolving: 0, overall: 0 },
+      },
+      jobSetup: jobSetup ? {
+        ...(jobSetup.jdText && { jdText: jobSetup.jdText }),
+        ...(jobSetup.topSkills && { topSkills: jobSetup.topSkills }),
+        config: jobSetup.config,
+        ...(mode === "company" && resumeText && { resumeText }),
+      } : undefined,
+      presence: {
+        phrasePrompt: "I confirm this interview response is my own.",
+      },
+    };
+
+    await createSession(session);
+
+    // Link resume to session if resumeId provided
+    if (resumeId && isSupabaseConfigured() && supabaseClient) {
       try {
-        jobSetup = {
-          ...validated.jobSetup,
-          jdText: validated.jobSetup.jdText ? await sanitizeForStorage(validated.jobSetup.jdText) : undefined,
-          topSkills: validated.jobSetup.topSkills ? await Promise.all(validated.jobSetup.topSkills.map(s => sanitizeForStorage(s))) : undefined,
-          resumeText: validated.jobSetup.resumeText ? await sanitizeForStorage(validated.jobSetup.resumeText) : undefined,
-        };
-      } catch (sanitizeError) {
-        logger.warn("Job setup sanitization failed, using raw values", { error: sanitizeError instanceof Error ? sanitizeError.message : String(sanitizeError) });
-        jobSetup = validated.jobSetup;
+        await supabaseClient
+          .from("resumes")
+          .update({ session_id: session.id })
+          .eq("id", resumeId);
+      } catch (error) {
+        logger.warn("Failed to link resume to session", { resumeId, sessionId: session.id, error: error instanceof Error ? error.message : String(error) });
       }
     }
 
-  const session: InterviewSession = {
-    id: randomId(),
-    mode,
-    createdAt: Date.now(),
-    resumeText,
-    jdText: jobSetup?.jdText,
-    role: validated.role,
-    level: validated.level,
-    status: "created",
-    questions: [],
-    currentQuestionIndex: 0,
-    answers: [],
-    evaluations: [],
-    scoreSummary: {
-      countEvaluated: 0,
-      avg: { technical: 0, communication: 0, problemSolving: 0, overall: 0 },
-    },
-    jobSetup: jobSetup ? {
-      ...(jobSetup.jdText && { jdText: jobSetup.jdText }),
-      ...(jobSetup.topSkills && { topSkills: jobSetup.topSkills }),
-      config: jobSetup.config,
-      ...(mode === "company" && resumeText && { resumeText }),
-    } : undefined,
-    presence: {
-      phrasePrompt: "I confirm this interview response is my own.",
-    },
-  };
-
-  try {
-    await createSession(session);
-  } catch (createError) {
-    const errorMessage = createError instanceof Error ? createError.message : String(createError);
-    logger.error("Failed to create session", createError instanceof Error ? createError : new Error(errorMessage), { 
-      mode, 
-      sessionId: session.id,
-      error: errorMessage,
-      isSupabaseConfigured: isSupabaseConfigured()
-    });
-    
-    // Provide more helpful error message
-    let userMessage = "Failed to create session";
-    let statusCode = 500;
-    
-    if (!isSupabaseConfigured()) {
-      userMessage = "Database not configured";
-      const detailedMessage = "Supabase is required for production use. Sessions cannot persist in serverless environments without a database. Please configure NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY environment variables in your Vercel project settings.";
-      statusCode = 503; // Service Unavailable
-      return apiError(userMessage, detailedMessage, statusCode);
-    } else if (errorMessage.includes("Supabase not configured")) {
-      userMessage = "Database not configured. Please configure Supabase to use this feature.";
-    } else if (errorMessage.includes("relation") || errorMessage.includes("table")) {
-      userMessage = "Database table not found. Please run database migrations.";
-    } else if (errorMessage.includes("permission") || errorMessage.includes("policy")) {
-      userMessage = "Database permission error. Please check Supabase configuration.";
-    }
-    
-    return apiError(
-      userMessage,
-      errorMessage,
-      statusCode
-    );
-  }
-
-  // Link resume to session if resumeId provided
-  if (resumeId && isSupabaseConfigured() && supabaseClient) {
-    try {
-      await supabaseClient
-        .from("resumes")
-        .update({ session_id: session.id })
-        .eq("id", resumeId);
-    } catch (error) {
-      logger.warn("Failed to link resume to session", { resumeId, sessionId: session.id, error: error instanceof Error ? error.message : String(error) });
-      // Don't fail the request if resume linking fails
-    }
-  }
-
-  // Log audit (don't fail if audit logging fails)
-  try {
+    // Log audit
     await logAudit('session_created', 'session', session.id, {
       mode: session.mode,
       status: session.status,
       resume_id: resumeId || null,
     });
-  } catch (auditError) {
-    logger.warn("Failed to log audit", { error: auditError instanceof Error ? auditError.message : String(auditError) });
-    // Don't fail the request if audit logging fails
-  }
 
-  const response = apiSuccess(
-    { sessionId: session.id },
-    "Session created successfully",
-    201
-  );
-  
-  // Ensure no caching
-  response.headers.set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
-  response.headers.set('Pragma', 'no-cache');
-  response.headers.set('Expires', '0');
-  
-  return response;
+    return apiSuccess(
+      { sessionId: session.id },
+      "Session created successfully",
+      201
+    );
   } catch (error) {
     logger.error("Error creating session", error instanceof Error ? error : new Error(String(error)), { mode: mode || 'unknown' });
     if (error instanceof Error) {
       return apiError("Internal server error", error.message, 500);
     }
+    return apiError("Internal server error", "An unexpected error occurred", 500);
+  }
+}
+
+export async function GET(req: Request) {
+  try {
+    const { searchParams } = new URL(req.url);
+    const idsParam = searchParams.get("ids");
+
+    if (!idsParam) {
+      return apiError("Missing parameter", "ids parameter is required", 400);
+    }
+
+    const ids = idsParam.split(",").map(id => id.trim()).filter(Boolean);
+
+    if (ids.length === 0) {
+      return apiSuccess({ sessions: [] });
+    }
+
+    // Limit to 100 sessions per request to prevent abuse
+    if (ids.length > 100) {
+      return apiError("Too many IDs", "Maximum 100 session IDs allowed per request", 400);
+    }
+
+    const sessions = await import("@/lib/unifiedStore").then(m => m.getSessionsByIds(ids));
+
+    return apiSuccess({ sessions });
+  } catch (error) {
+    logger.error("Error fetching sessions", error instanceof Error ? error : new Error(String(error)));
     return apiError("Internal server error", "An unexpected error occurred", 500);
   }
 }

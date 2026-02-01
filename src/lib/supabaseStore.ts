@@ -1,4 +1,4 @@
-import { supabase, isSupabaseConfigured, TABLES, getSupabaseClient } from './supabase';
+import { supabase, isSupabaseConfigured, TABLES } from './supabase';
 import { InterviewSession, CollegeJobTemplate, CandidateBatch } from './types';
 import { logger } from './logger';
 
@@ -7,17 +7,11 @@ import { logger } from './logger';
 // ============================================
 
 export async function createSession(session: InterviewSession): Promise<InterviewSession> {
-  if (!isSupabaseConfigured()) {
+  if (!isSupabaseConfigured() || !supabase) {
     throw new Error('Supabase not configured');
   }
 
-  // Use admin client for server-side operations to ensure consistency
-  const client = getSupabaseClient(true) || supabase;
-  if (!client) {
-    throw new Error('Supabase client not available');
-  }
-
-  const { data, error } = await client
+  const { data, error } = await supabase
     .from(TABLES.SESSIONS)
     .insert({
       id: session.id,
@@ -62,185 +56,28 @@ export async function createSession(session: InterviewSession): Promise<Intervie
   return mapDbSessionToSession(data);
 }
 
-export async function getSession(id: string, expectedUpdatedAt?: string): Promise<InterviewSession | null> {
-  if (!isSupabaseConfigured()) {
-    logger.warn('Supabase not configured in getSession', { sessionId: id });
+export async function getSession(id: string): Promise<InterviewSession | null> {
+  if (!isSupabaseConfigured() || !supabase) {
     return null;
   }
 
-  logger.debug('Querying Supabase for session', { sessionId: id, table: TABLES.SESSIONS, expectedUpdatedAt });
-  console.log(`[GET SESSION] Querying session ${id}${expectedUpdatedAt ? ` (expecting updated_at >= ${expectedUpdatedAt})` : ''}`);
-  
-  // Use admin client for server-side reads to bypass read replicas
-  // This ensures we get fresh data immediately after updates
-  const client = getSupabaseClient(true); // Use admin client to bypass read replicas
-  if (!client) {
-    logger.warn('Supabase client not available, falling back to anon key', { sessionId: id });
-    // Fall back to regular client if admin not available
-    if (!supabase) {
-      return null;
-    }
-  }
-  
-  // Retry mechanism to handle read replica lag (if using anon key)
-  // If using admin key, we should get fresh data immediately, but still retry for safety
-  // In production, be more aggressive with retries due to higher read replica lag
-  const isProduction = process.env.NODE_ENV === 'production' || process.env.VERCEL_ENV === 'production';
-  let data = null;
-  let error = null;
-  const useAdmin = client !== supabase; // Check if we're using admin client
-  // In production, use more retries even with admin client (network latency, etc.)
-  const maxRetries = isProduction 
-    ? (useAdmin ? 5 : 15)  // Production: more retries
-    : (useAdmin ? 3 : 10); // Development: fewer retries
-  const retryDelay = isProduction
-    ? (useAdmin ? 200 : 600)  // Production: longer delays
-    : (useAdmin ? 100 : 500); // Development: shorter delays
-  const maxStaleness = 60000; // 60 seconds - if updated_at is older than this, it's definitely stale
-  
-  // Add query timeout (5 seconds max per query)
-  const queryTimeout = 5000;
-  
-  for (let attempt = 0; attempt < maxRetries; attempt++) {
-    if (attempt > 0) {
-      console.log(`[GET SESSION] Retry attempt ${attempt + 1}/${maxRetries} (read replica lag?)`);
-      await new Promise(resolve => setTimeout(resolve, retryDelay * attempt));
-    }
-    
-    try {
-      // Use the appropriate client (admin for server-side, anon for client-side)
-      const queryPromise = (client || supabase)!
-        .from(TABLES.SESSIONS)
-        .select('*')
-        .eq('id', id)
-        .single();
-      
-      const timeoutPromise = new Promise<never>((_, reject) => {
-        setTimeout(() => reject(new Error('Query timeout')), queryTimeout);
-      });
-      
-      const result = await Promise.race([queryPromise, timeoutPromise]);
-      
-      // Note: Supabase doesn't support direct cache control, but we can try to force fresh reads
-      // by using the service role key for critical reads (if available)
-      
-      error = result.error;
-      data = result.data;
-      
-      // Log what we actually got from the database
-      if (data) {
-        console.log(`[GET SESSION] Attempt ${attempt + 1} - status: ${data.status}, questions: ${data.questions?.length || 0}, updated_at: ${data.updated_at}`);
-        
-        let shouldRetry = false;
-        
-        // Check 1: If we have an expected timestamp and this data is older, retry
-        if (expectedUpdatedAt && data.updated_at) {
-          const dataTime = new Date(data.updated_at).getTime();
-          const expectedTime = new Date(expectedUpdatedAt).getTime();
-          if (dataTime < expectedTime) {
-            console.log(`[GET SESSION] Data is stale (${data.updated_at} < ${expectedUpdatedAt}), retrying...`);
-            shouldRetry = true;
-          } else {
-            console.log(`[GET SESSION] Got fresh data (${data.updated_at} >= ${expectedUpdatedAt})`);
-          }
-        }
-        
-        // Check 2: If status is "created" with 0 questions, check if data might be stale
-        // This handles cases where the session was just updated but read replica hasn't caught up
-        if (!shouldRetry && data.status === "created" && (!data.questions || data.questions.length === 0)) {
-          // Check how old the data is - if it's very old, it's probably actually "created"
-          // But if it's recent (within last 2 minutes), it might be stale
-          const dataTime = new Date(data.updated_at).getTime();
-          const now = Date.now();
-          const age = now - dataTime;
-          
-          // If data is less than 2 minutes old, it might be stale (retry)
-          // If it's older, it's probably actually "created" (don't retry)
-          if (age < 120000 && attempt < maxRetries - 1) {
-            console.log(`[GET SESSION] Status is 'created' with 0 questions, data is ${Math.round(age/1000)}s old (might be stale), retrying...`);
-            shouldRetry = true;
-          } else if (age >= 120000) {
-            console.log(`[GET SESSION] Status is 'created' with 0 questions, but data is ${Math.round(age/1000)}s old (probably actually created), not retrying`);
-          }
-        }
-        
-        // Check 3: If data looks suspiciously stale (status is "created" but updated_at is very recent)
-        // This suggests the session might have been updated but we're seeing old data
-        if (!shouldRetry && data.status === "created" && data.updated_at) {
-          const dataTime = new Date(data.updated_at).getTime();
-          const now = Date.now();
-          const age = now - dataTime;
-          
-          // If the data was updated recently (within last 60 seconds) but status is still "created",
-          // it might be stale (unless it really is still "created")
-          if (age < maxStaleness && attempt < maxRetries - 1) {
-            console.log(`[GET SESSION] Data might be stale (status: created, but updated ${Math.round(age/1000)}s ago), retrying...`);
-            shouldRetry = true;
-          }
-        }
-        
-        if (!shouldRetry) {
-          break;
-        }
-      }
-    } catch (timeoutError) {
-      if (timeoutError instanceof Error && timeoutError.message === 'Query timeout') {
-        logger.warn('Query timeout, retrying...', { sessionId: id, attempt: attempt + 1 });
-        if (attempt < maxRetries - 1) {
-          continue; // Retry on timeout
-        } else {
-          error = { message: 'Query timeout after retries', code: 'TIMEOUT' } as any;
-          break;
-        }
-      }
-      throw timeoutError; // Re-throw non-timeout errors
-    }
-    
-    // Handle errors from the query
-    if (error && error.code !== 'PGRST116') {
-      // Real error, don't retry
-      break;
-    } else if (!data && !error) {
-      // No data and no error, break
-      break;
-    }
-  }
+  const { data, error } = await supabase
+    .from(TABLES.SESSIONS)
+    .select('*')
+    .eq('id', id)
+    .single();
 
   if (error) {
-    // If error code is PGRST116, the row doesn't exist (not an error)
     if (error.code === 'PGRST116') {
-      logger.debug('Session not found in Supabase (PGRST116)', { sessionId: id });
-      return null;
+      return null; // Not found
     }
-    
-    // Log detailed error information
-    logger.error('Error fetching session from Supabase', error instanceof Error ? error : new Error(String(error)), { 
-      sessionId: id,
-      errorCode: error.code,
-      errorMessage: error.message,
-      errorDetails: error.details,
-      errorHint: error.hint,
-      table: TABLES.SESSIONS,
-      possibleCauses: [
-        error.code === '42P01' ? 'Table does not exist - run database migrations' : null,
-        error.code === '42501' ? 'Permission denied - check RLS policies' : null,
-        error.message?.includes('relation') ? 'Table not found - check migrations' : null,
-        error.message?.includes('permission') ? 'RLS policy blocking access' : null,
-      ].filter(Boolean)
-    });
-    throw error;
+    logger.error('Error getting session from Supabase', new Error(error.message), { sessionId: id, errorCode: error.code });
+    throw error; // Throw instead of returning null so unifiedStore knows it failed
   }
 
   if (!data) {
-    logger.debug('No data returned from Supabase query', { sessionId: id });
     return null;
   }
-
-  logger.debug('Session data retrieved from Supabase', { 
-    sessionId: id, 
-    status: data.status,
-    hasQuestions: !!data.questions?.length
-  });
 
   return mapDbSessionToSession(data);
 }
@@ -249,34 +86,22 @@ export async function updateSession(
   id: string,
   updater: (s: InterviewSession) => InterviewSession
 ): Promise<InterviewSession | null> {
-  console.log(`[UPDATE SESSION] Called for session ${id}`);
   if (!isSupabaseConfigured() || !supabase) {
-    console.log(`[UPDATE SESSION] Supabase not configured`);
     return null;
   }
 
   // Get current session
   const current = await getSession(id);
   if (!current) {
-    console.log(`[UPDATE SESSION] Session not found: ${id}`);
     logger.error('Cannot update: session not found', undefined, { sessionId: id });
     return null;
   }
 
-  console.log(`[UPDATE SESSION] Current session status: ${current.status}, questions: ${current.questions?.length || 0}`);
   // Apply update
   const updated = updater(current);
-  console.log(`[UPDATE SESSION] After updater - status: ${updated.status}, questions: ${updated.questions?.length || 0}`);
 
   // Build update payload - ensure questions is always an array
   const questions = Array.isArray(updated.questions) ? updated.questions : [];
-
-  logger.info('Updating session in Supabase', { 
-    sessionId: id, 
-    status: updated.status, 
-    questionCount: questions.length,
-    currentQuestionIndex: updated.currentQuestionIndex 
-  });
 
   const updatePayload: any = {
     status: updated.status,
@@ -302,147 +127,24 @@ export async function updateSession(
   if (updated.level !== undefined) updatePayload.level = updated.level;
 
   // Update in database
-  logger.debug('Executing Supabase update', { 
-    sessionId: id, 
-    table: TABLES.SESSIONS,
-    updatePayloadKeys: Object.keys(updatePayload),
-    questionsCount: questions.length,
-    status: updatePayload.status,
-    questionsType: Array.isArray(questions) ? 'array' : typeof questions,
-    questionsIsArray: Array.isArray(questions)
-  });
-  
-  // Log a sample of the questions to verify structure
-  if (questions.length > 0) {
-    logger.debug('Questions sample', {
-      sessionId: id,
-      firstQuestion: {
-        id: questions[0]?.id,
-        text: questions[0]?.text?.substring(0, 100),
-        category: questions[0]?.category,
-        hasId: !!questions[0]?.id,
-        hasText: !!questions[0]?.text
-      }
-    });
-  }
-  
-  // Use admin client for updates to ensure consistency
-  const client = getSupabaseClient(true); // Use admin client for server-side operations
-  const updateClient = client || supabase;
-  if (!updateClient) {
-    logger.error('No Supabase client available for update', undefined, { sessionId: id });
-    return null;
-  }
-  
-  // Use a fresh query to ensure we get the updated data
-  const { data, error, count } = await updateClient
+  const { data, error } = await supabase
     .from(TABLES.SESSIONS)
     .update(updatePayload)
     .eq('id', id)
     .select()
     .single();
-  
-  // If update succeeded, verify with a fresh read to ensure consistency
-  if (!error && data) {
-    console.log(`[UPDATE SESSION] Update succeeded, doing verification read...`);
-    
-    // Do a fresh read to verify the update persisted
-    // Retry a few times in case of read replica lag
-    // Use a longer delay to allow replication to complete
-    let verifyData = null;
-    for (let attempt = 0; attempt < 5; attempt++) {
-      // Increase delay with each attempt: 200ms, 400ms, 600ms, 800ms, 1000ms
-      await new Promise(resolve => setTimeout(resolve, 200 * (attempt + 1)));
-      
-      const { data: freshData, error: verifyError } = await supabase
-        .from(TABLES.SESSIONS)
-        .select('*')
-        .eq('id', id)
-        .single();
-      
-      if (verifyError) {
-        logger.warn(`Verification read attempt ${attempt + 1} failed`, { sessionId: id, error: verifyError.message });
-        continue;
-      }
-      
-      if (freshData) {
-        console.log(`[UPDATE SESSION] Verification read attempt ${attempt + 1} - status: ${freshData.status}, questions: ${freshData.questions?.length || 0}`);
-        
-        // Check if the data matches what we just wrote
-        if (freshData.status === updatePayload.status && 
-            Array.isArray(freshData.questions) && 
-            freshData.questions.length === questions.length) {
-          verifyData = freshData;
-          console.log(`[UPDATE SESSION] Verification successful on attempt ${attempt + 1}`);
-          break;
-        } else {
-          console.log(`[UPDATE SESSION] Verification mismatch - expected status: ${updatePayload.status}, got: ${freshData.status}, expected questions: ${questions.length}, got: ${freshData.questions?.length || 0}`);
-        }
-      }
-    }
-    
-    // Use verified data if available, otherwise use the update response
-    if (verifyData) {
-      console.log(`[UPDATE SESSION] Using verified data from fresh read`);
-      // Replace data with verifyData for mapping
-      Object.assign(data, verifyData);
-    } else {
-      console.log(`[UPDATE SESSION] Warning: Could not verify update, using update response data`);
-    }
-  }
-
-  logger.debug('Supabase update response', {
-    sessionId: id,
-    hasError: !!error,
-    hasData: !!data,
-    errorCode: error?.code,
-    errorMessage: error?.message,
-    dataStatus: data?.status,
-    dataQuestionsCount: data?.questions?.length,
-    dataQuestionsType: typeof data?.questions,
-    dataQuestionsIsArray: Array.isArray(data?.questions)
-  });
 
   if (error) {
-    logger.error('Error updating session in Supabase', new Error(error.message), { 
-      sessionId: id, 
-      errorCode: error.code,
-      errorMessage: error.message,
-      errorDetails: error,
-      errorHint: error.hint,
-      updatePayload: { 
-        ...updatePayload, 
-        questions: `[${questions.length} questions]`,
-        questionsPreview: questions.slice(0, 2).map(q => ({ id: q.id, text: q.text?.substring(0, 50) }))
-      }
-    });
-    throw new Error(`Database update failed: ${error.message} (code: ${error.code})`);
+    logger.error('Error updating session', new Error(error.message), { sessionId: id, errorCode: error.code });
+    throw new Error(`Database update failed: ${error.message}`);
   }
 
   if (!data) {
-    logger.error('No data returned from Supabase update', undefined, { 
-      sessionId: id,
-      updatePayload: { 
-        ...updatePayload, 
-        questions: `[${questions.length} questions]` 
-      },
-      note: 'This might indicate a RLS policy issue or the row was not found'
-    });
-    throw new Error('No data returned from update - check RLS policies');
+    logger.error('No data returned from Supabase update', undefined, { sessionId: id });
+    throw new Error('No data returned from update');
   }
 
-  const mapped = mapDbSessionToSession(data);
-  logger.info('Session updated successfully in Supabase', { 
-    sessionId: id, 
-    status: mapped.status, 
-    questionCount: mapped.questions?.length || 0,
-    returnedQuestionCount: data.questions?.length || 0,
-    returnedStatus: data.status,
-    mappedStatus: mapped.status,
-    questionsMatch: mapped.questions?.length === questions.length
-  });
-
-  return mapped;
+  return mapDbSessionToSession(data);
 }
 
 export async function findSessionByShareToken(token: string): Promise<InterviewSession | null> {
@@ -507,68 +209,11 @@ export async function getAllSessions(): Promise<InterviewSession[]> {
   return (data || []).map(mapDbSessionToSession);
 }
 
-export async function getSessionsByMode(mode: string): Promise<InterviewSession[]> {
-  if (!isSupabaseConfigured() || !supabase) {
-    return [];
-  }
-
-  const { data, error } = await supabase
-    .from(TABLES.SESSIONS)
-    .select('*')
-    .eq('mode', mode)
-    .order('created_at', { ascending: false });
-
-  if (error) {
-    logger.error('Error getting sessions by mode', error instanceof Error ? error : new Error(String(error)), { mode });
-    return [];
-  }
-
-  return (data || []).map(mapDbSessionToSession);
-}
-
-export async function getSessionsByEmail(email: string): Promise<InterviewSession[]> {
-  if (!isSupabaseConfigured() || !supabase) {
-    return [];
-  }
-
-  const { data, error } = await supabase
-    .from(TABLES.SESSIONS)
-    .select('*')
-    .eq('candidate_email', email)
-    .order('created_at', { ascending: false });
-
-  if (error) {
-    logger.error('Error getting sessions by email', error instanceof Error ? error : new Error(String(error)), { email });
-    return [];
-  }
-
-  return (data || []).map(mapDbSessionToSession);
-}
-
-export async function getSessionsByTemplate(templateId: string): Promise<InterviewSession[]> {
-  if (!isSupabaseConfigured() || !supabase) {
-    return [];
-  }
-
-  const { data, error } = await supabase
-    .from(TABLES.SESSIONS)
-    .select('*')
-    .eq('college_job_template_id', templateId)
-    .order('created_at', { ascending: false });
-
-  if (error) {
-    logger.error('Error getting sessions by template', error instanceof Error ? error : new Error(String(error)), { templateId });
-    return [];
-  }
-
-  return (data || []).map(mapDbSessionToSession);
-}
-
 // Helper to map database row to InterviewSession
 function mapDbSessionToSession(row: any): InterviewSession {
   // Handle questions - Supabase JSONB returns as array or null
   let questions: any[] = [];
-  
+
   if (row.questions) {
     if (Array.isArray(row.questions)) {
       questions = row.questions;
@@ -698,6 +343,7 @@ export async function createBatch(batch: CandidateBatch): Promise<CandidateBatch
     .insert({
       id: batch.id,
       job_template_id: batch.jobTemplateId,
+      college_id: batch.collegeId || null,
     })
     .select()
     .single();
@@ -786,6 +432,7 @@ export async function getBatchesByTemplate(templateId: string): Promise<Candidat
     return [];
   }
 
+  // Get all batches for this template
   const { data: batchesData, error: batchesError } = await supabase
     .from(TABLES.BATCHES)
     .select('*')
@@ -797,31 +444,53 @@ export async function getBatchesByTemplate(templateId: string): Promise<Candidat
     return [];
   }
 
-  // Get candidates for each batch
-  const batches: CandidateBatch[] = [];
-  for (const batch of batchesData || []) {
-    const { data: candidatesData } = await supabase
-      .from(TABLES.BATCH_CANDIDATES)
-      .select('*')
-      .eq('batch_id', batch.id);
+  if (!batchesData || batchesData.length === 0) {
+    return [];
+  }
 
-    batches.push({
+  const batchIds = batchesData.map(b => b.id);
+
+  // Get all candidates for these batches in ONE query
+  const { data: allCandidatesData, error: candidatesError } = await supabase
+    .from(TABLES.BATCH_CANDIDATES)
+    .select('*')
+    .in('batch_id', batchIds);
+
+  if (candidatesError) {
+    logger.error('Error getting batch candidates', candidatesError instanceof Error ? candidatesError : new Error(String(candidatesError)), { templateId });
+    // Return batches without candidates if candidate fetch fails
+    return batchesData.map(batch => ({
       id: batch.id,
       jobTemplateId: batch.job_template_id,
       createdAt: new Date(batch.created_at).getTime(),
-      candidates: (candidatesData || []).map(c => ({
-        email: c.email,
-        name: c.name,
-        studentId: c.student_id || undefined,
-        sessionId: c.session_id || undefined,
-        status: c.status || 'pending',
-        completedAt: c.completed_at ? new Date(c.completed_at).getTime() : undefined,
-        linkSentAt: c.link_sent_at ? new Date(c.link_sent_at).getTime() : undefined,
-      })),
-    });
+      candidates: [],
+    }));
   }
 
-  return batches;
+  // Group candidates by batch_id
+  const candidatesByBatch = (allCandidatesData || []).reduce((acc, candidate) => {
+    if (!acc[candidate.batch_id]) {
+      acc[candidate.batch_id] = [];
+    }
+    acc[candidate.batch_id].push({
+      email: candidate.email,
+      name: candidate.name,
+      studentId: candidate.student_id || undefined,
+      sessionId: candidate.session_id || undefined,
+      status: candidate.status || 'pending',
+      completedAt: candidate.completed_at ? new Date(candidate.completed_at).getTime() : undefined,
+      linkSentAt: candidate.link_sent_at ? new Date(candidate.link_sent_at).getTime() : undefined,
+    });
+    return acc;
+  }, {} as Record<string, any[]>);
+
+  // Map batches with their candidates
+  return batchesData.map(batch => ({
+    id: batch.id,
+    jobTemplateId: batch.job_template_id,
+    createdAt: new Date(batch.created_at).getTime(),
+    candidates: candidatesByBatch[batch.id] || [],
+  }));
 }
 
 function mapDbTemplateToTemplate(row: any): CollegeJobTemplate {

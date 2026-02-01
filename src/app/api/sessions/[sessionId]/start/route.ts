@@ -6,38 +6,19 @@ import { InterviewQuestion } from "@/lib/types";
 import { apiSuccess, apiError } from "@/lib/apiResponse";
 import { logger } from "@/lib/logger";
 
-// Disable caching to ensure fresh data (handles read replica lag)
-export const dynamic = 'force-dynamic';
-export const revalidate = 0;
-// Increase timeout for question generation (can take up to 60s)
-export const maxDuration = 60;
+// Vercel serverless function configuration
+export const maxDuration = 60; // 60 seconds for OpenAI API calls
+export const dynamic = 'force-dynamic'; // Disable caching
+
 
 export async function POST(
   _req: Request,
   { params }: { params: { sessionId: string } }
 ) {
-  const sessionId = params.sessionId;
-  // Use console.log here to ensure we see this even if logger level is wrong
-  console.log(`[START ENDPOINT] POST /api/sessions/${sessionId}/start called`);
-  logger.info("Start interview request received", { sessionId });
-  
   try {
-    const existing = await getSession(sessionId);
-    logger.debug("Session retrieved", { sessionId, status: existing?.status, hasQuestions: !!existing?.questions?.length });
+    const existing = await getSession(params.sessionId);
     if (!existing) {
-      logger.warn("Session not found", { sessionId, isSupabaseConfigured: process.env.NEXT_PUBLIC_SUPABASE_URL ? true : false });
-      
-      // Provide helpful error message if Supabase is not configured
-      const isSupabaseConfigured = process.env.NEXT_PUBLIC_SUPABASE_URL && process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-      if (!isSupabaseConfigured) {
-        return apiError(
-          "Database not configured",
-          "Supabase is required for production use. Sessions cannot persist in serverless environments without a database. Please configure NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY environment variables.",
-          503
-        );
-      }
-      
-      return apiError("Session not found", "The requested session does not exist. It may have expired or been deleted.", 404);
+      return apiError("Session not found", "The requested session does not exist", 404);
     }
 
     if (!process.env.OPENAI_API_KEY) {
@@ -50,11 +31,10 @@ export async function POST(
 
     // If already started and has questions, return success
     if (existing.questions && existing.questions.length > 0) {
-      logger.info("Interview already started", { sessionId, questionCount: existing.questions.length });
       const response = apiSuccess(
-        { 
+        {
           alreadyStarted: true,
-          total: existing.questions.length 
+          total: existing.questions.length
         },
         "Interview already started"
       );
@@ -65,34 +45,48 @@ export async function POST(
     }
 
     // Validate required fields
-    if (!existing.resumeText || existing.resumeText.length < 50) {
-      logger.warn("Resume text validation failed", { sessionId, resumeLength: existing.resumeText?.length || 0 });
-      return apiError(
-        "Validation failed",
-        "Resume text is required and must be at least 50 characters",
-        400
-      );
+    // For college mode, resume text can be empty initially (candidate will upload it)
+    // For other modes, resume text is required
+    if (existing.mode !== "college") {
+      if (!existing.resumeText || existing.resumeText.length < 50) {
+        return apiError(
+          "Validation failed",
+          "Resume text is required and must be at least 50 characters",
+          400
+        );
+      }
+    } else {
+      // College mode: resume text is optional, but if provided must be at least 50 chars
+      if (existing.resumeText && existing.resumeText.length > 0 && existing.resumeText.length < 50) {
+        return apiError(
+          "Validation failed",
+          "Resume text must be at least 50 characters if provided",
+          400
+        );
+      }
     }
 
     // Get question count from jobSetup config if available
     const questionCount = existing.jobSetup?.config?.questionCount || 8;
     const jdText = existing.jdText || existing.jobSetup?.jdText;
 
-    logger.info("Generating interview questions", { sessionId, questionCount, mode: existing.mode, hasJdText: !!jdText });
+    // For college mode, use a placeholder resume text if not provided
+    // This allows the interview to start, and the candidate can provide resume later
+    const resumeText = existing.resumeText || (existing.mode === "college"
+      ? `Candidate: ${existing.candidateName || "Student"} (${existing.candidateEmail || "student"})`
+      : "");
 
-    // Generate questions with timeout wrapper
+    // Generate questions
     const prompt = buildQuestionGenPrompt({
       mode: existing.mode,
       role: existing.role,
       level: existing.level,
-      resumeText: existing.resumeText,
+      resumeText: resumeText,
       jdText: jdText,
       count: questionCount,
     });
 
-    // Add timeout for OpenAI call (25 seconds to leave buffer for other operations)
-    const openaiTimeout = 25000;
-    const openaiPromise = getOpenAI().chat.completions.create({
+    const resp = await getOpenAI().chat.completions.create({
       model: "gpt-4o-mini",
       temperature: 0.4,
       response_format: { type: "json_object" } as any,
@@ -101,25 +95,6 @@ export async function POST(
         { role: "user", content: prompt },
       ],
     });
-
-    const timeoutPromise = new Promise<never>((_, reject) => {
-      setTimeout(() => reject(new Error('OpenAI API timeout')), openaiTimeout);
-    });
-
-    let resp;
-    try {
-      resp = await Promise.race([openaiPromise, timeoutPromise]);
-    } catch (error) {
-      if (error instanceof Error && error.message === 'OpenAI API timeout') {
-        logger.error("OpenAI API timeout", undefined, { sessionId, timeout: openaiTimeout });
-        return apiError(
-          "Request timeout",
-          "Question generation took too long. Please try again.",
-          504
-        );
-      }
-      throw error;
-    }
 
     const raw = resp.choices[0]?.message?.content ?? "";
     if (!raw) {
@@ -154,27 +129,32 @@ export async function POST(
       );
     }
 
-    // Normalize questions
-    const questions = parsed.questions.map((q, i) => ({
+    // Normalize questions and enforce count
+    const questions = parsed.questions.slice(0, questionCount).map((q, i) => ({
       id: q.id || `q${i + 1}`,
       text: q.text || `Question ${i + 1}`,
       category: q.category || "technical",
       difficulty: q.difficulty || "medium",
     }));
 
-    logger.info("Questions generated successfully", { sessionId, questionCount: questions.length });
-
     // Update session with questions
-    logger.info("Updating session with questions", { sessionId, questionCount: questions.length });
-    const updated = await updateSession(sessionId, (s) => ({
+    const now = Date.now();
+    const updated = await updateSession(params.sessionId, (s) => ({
       ...s,
       status: "in_progress",
       questions: questions,
       currentQuestionIndex: 0,
+      startedAt: now,
+      lastActivityAt: now,
+      questionTimings: questions.map(q => ({
+        questionId: q.id,
+        displayedAt: 0, // Will be set when question is actually displayed
+        answeredAt: undefined,
+        timeSpent: undefined,
+      })),
     }));
 
     if (!updated) {
-      logger.error("updateSession returned null", undefined, { sessionId });
       return apiError(
         "Failed to update session",
         "Could not save questions to session",
@@ -182,19 +162,8 @@ export async function POST(
       );
     }
 
-    logger.info("Session updated, verifying questions were saved", { 
-      sessionId, 
-      updatedQuestionCount: updated.questions?.length || 0,
-      updatedStatus: updated.status 
-    });
-
     // Verify questions were saved
     if (!updated.questions || updated.questions.length === 0) {
-      logger.error("Questions not found in updated session", undefined, { 
-        sessionId,
-        hasQuestions: !!updated.questions,
-        questionsLength: updated.questions?.length
-      });
       return apiError(
         "Questions not saved",
         "Questions were not saved correctly to the session",
@@ -202,47 +171,12 @@ export async function POST(
       );
     }
 
-    // Double-check by fetching the session again to verify it was persisted
-    // The getSession function will retry if it gets stale data (handles read replica lag)
-    logger.info("Verifying session was persisted to database", { sessionId });
-    const verified = await getSession(sessionId);
-    if (!verified) {
-      logger.error("Session not found after update", undefined, { sessionId });
-      return apiError(
-        "Session verification failed",
-        "Session was not found after update",
-        500
-      );
-    }
-    
-    if (!verified.questions || verified.questions.length === 0) {
-      logger.error("Questions not found in verified session", undefined, { 
-        sessionId,
-        verifiedStatus: verified.status,
-        hasQuestions: !!verified.questions,
-        questionsLength: verified.questions?.length
-      });
-      return apiError(
-        "Questions not persisted",
-        "Questions were not persisted to the database",
-        500
-      );
-    }
-
-    logger.info("Session verified successfully", { 
-      sessionId, 
-      verifiedQuestionCount: verified.questions.length,
-      verifiedStatus: verified.status 
-    });
-
-    await logAudit('interview_started', 'session', sessionId, {
+    await logAudit('interview_started', 'session', params.sessionId, {
       question_count: questions.length,
     });
 
-    logger.info("Interview started successfully", { sessionId, questionCount: questions.length });
-
     const response = apiSuccess(
-      { 
+      {
         total: updated.questions.length,
         questions: updated.questions,
       },
@@ -256,7 +190,7 @@ export async function POST(
 
     return response;
   } catch (error) {
-    logger.error("Error in start route", error instanceof Error ? error : new Error(String(error)), { sessionId });
+    logger.error("Error in start route", error instanceof Error ? error : new Error(String(error)), { sessionId: params.sessionId });
     return apiError(
       "Internal server error",
       error instanceof Error ? error.message : "An unexpected error occurred",

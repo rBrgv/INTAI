@@ -1,12 +1,6 @@
-import { NextResponse } from "next/server";
 import { getTemplate, getBatchesByTemplate, getSessionsByIds } from "@/lib/unifiedStore";
 import { apiSuccess, apiError } from "@/lib/apiResponse";
 import { logger } from "@/lib/logger";
-
-// Configure for production
-export const dynamic = 'force-dynamic';
-export const revalidate = 0;
-export const maxDuration = 30; // Analytics should be fast
 
 export async function GET(
   _req: Request,
@@ -116,7 +110,7 @@ export async function GET(
       }).length,
     }));
 
-    return NextResponse.json({
+    return apiSuccess({
       templateId: params.templateId,
       summary: {
         totalCandidates,

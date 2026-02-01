@@ -4,7 +4,7 @@ import { useState, useRef, useEffect } from "react";
 import { Check } from "lucide-react";
 import Card from "./Card";
 import mammoth from "mammoth";
-import { sanitizeForStorageSync, sanitizeHtmlSync } from "@/lib/sanitize";
+import { sanitizeForStorage, sanitizeHtml } from "@/lib/sanitize";
 import { clientLogger } from "@/lib/clientLogger";
 
 type FileUploadWithPreviewProps = {
@@ -228,7 +228,7 @@ export default function FileUploadWithPreview({
         // Also extract plain text for the textarea
         const textResult = await mammoth.extractRawText({ arrayBuffer });
         if (textResult.value) {
-          const sanitizedText = sanitizeForStorageSync(textResult.value);
+          const sanitizedText = sanitizeForStorage(textResult.value);
           setText(sanitizedText);
           onTextChange?.(sanitizedText);
           

@@ -2,21 +2,63 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
-import { ArrowLeft, ArrowRight, Check, Lock, ArrowRight as ArrowRightIcon, CheckCircle2, Briefcase, GraduationCap, User, Code, TrendingUp, Clock, Circle, Shield, AlertTriangle, Lightbulb, Timer, UserCircle, Layers, Volume2, VolumeX, Maximize2, Minimize2 } from "lucide-react";
+import { ArrowLeft, ArrowRight, Check, Lock, ArrowRight as ArrowRightIcon, CheckCircle2, Lightbulb, Info } from "lucide-react";
 import Card from "@/components/Card";
 import Badge from "@/components/Badge";
 import Progress from "@/components/Progress";
 import Skeleton from "@/components/Skeleton";
 import InterviewerPanel from "@/components/InterviewerPanel";
 import ReportView from "@/components/ReportView";
+import InterviewHelpPanel from "@/components/InterviewHelpPanel";
+import AnswerFeedback from "@/components/AnswerFeedback";
 import { clientLogger } from "@/lib/clientLogger";
 import PresenceCheckModal from "@/components/PresenceCheckModal";
 import VoiceAnswerRecorder from "@/components/VoiceAnswerRecorder";
-import { ToastManager, ToastType } from "@/components/Toast";
-import { SecurityMonitor } from "@/components/SecurityMonitor";
-import { isMobileDevice, getDeviceInfo } from "@/lib/deviceDetection";
-import InterviewRulesModal from "@/components/InterviewRulesModal";
-import { retryWithBackoff, isRetryableError } from "@/lib/retry";
+import { ToastContainer, ToastType } from "@/components/Toast";
+
+// Loading Tips Component
+function LoadingTips() {
+  const tips = [
+    { icon: "🎙️", text: "Find a quiet place with stable internet connection" },
+    { icon: "💡", text: "You can use voice or text to answer questions" },
+    { icon: "⏱️", text: "Take your time to think before answering" },
+    { icon: "📝", text: "Be specific and provide examples in your answers" },
+    { icon: "🎯", text: "Focus on demonstrating your problem-solving approach" },
+  ];
+
+  const [currentTip, setCurrentTip] = useState(0);
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setCurrentTip((prev) => (prev + 1) % tips.length);
+    }, 2500);
+    return () => clearInterval(interval);
+  }, [tips.length]);
+
+  return (
+    <div className="relative h-20 overflow-hidden">
+      {tips.map((tip, index) => (
+        <div
+          key={index}
+          className={`absolute inset-0 transition-all duration-500 transform ${index === currentTip
+            ? "opacity-100 translate-y-0"
+            : index < currentTip
+              ? "opacity-0 -translate-y-full"
+              : "opacity-0 translate-y-full"
+            }`}
+        >
+          <div className="flex items-start gap-3 p-4 bg-[var(--info-bg)] border border-[var(--info)]/30 rounded-xl">
+            <span className="text-2xl flex-shrink-0">{tip.icon}</span>
+            <p className="text-sm text-[var(--text)] font-medium leading-relaxed">
+              {tip.text}
+            </p>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 
 type ApiState = {
   session: {
@@ -27,6 +69,7 @@ type ApiState = {
     status: string;
     currentQuestionIndex: number;
     totalQuestions: number;
+    startedAt?: number; // Timestamp when interview was started
   };
   currentQuestion: null | {
     id: string;
@@ -89,9 +132,9 @@ type Report = {
   executiveSummary: string;
   strengths: string[];
   gapsAndRisks: string[];
-  evidence: Array<{ 
-    claim: string; 
-    supportingAnswerSnippet: string; 
+  evidence: Array<{
+    claim: string;
+    supportingAnswerSnippet: string;
     relatedQuestionId: string;
     evidenceType?: "technical" | "leadership" | "communication" | "problem_solving";
   }>;
@@ -116,8 +159,8 @@ function getStatusBadgeVariant(status: string): "default" | "success" | "warning
 
 export default function InterviewClient({ sessionId }: { sessionId: string }) {
   const searchParams = useSearchParams();
-  const isRecruiterView = searchParams?.get("view") === "recruiter";
-  
+  const isRecruiterView = searchParams.get("view") === "recruiter";
+
   const [data, setData] = useState<ApiState | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -131,26 +174,22 @@ export default function InterviewClient({ sessionId }: { sessionId: string }) {
   const [reportScoreSummary, setReportScoreSummary] = useState<ApiState["scoreSummary"] | null>(null);
   const [initialLoading, setInitialLoading] = useState(true);
   const [readAloud, setReadAloud] = useState(false);
-  const [cameraEnabled, setCameraEnabled] = useState(false); // UI state - always shows as off
   const [isTyping, setIsTyping] = useState(false);
-  const [isSpeaking, setIsSpeaking] = useState(false);
   const [previousQuestionId, setPreviousQuestionId] = useState<string | null>(null);
   const [shareToken, setShareToken] = useState<string | null>(null);
   const [copySuccess, setCopySuccess] = useState(false);
   const [presence, setPresence] = useState<any>(null);
   const [showPresenceModal, setShowPresenceModal] = useState(false);
-  const [showRulesModal, setShowRulesModal] = useState(false);
-  const [fullScreenMode, setFullScreenMode] = useState(false);
+  const [focusMode, setFocusMode] = useState(false);
   const [tabSwitchCount, setTabSwitchCount] = useState(0);
   const [tabSwitchWarning, setTabSwitchWarning] = useState<string | null>(null);
   const [showConfirmDialog, setShowConfirmDialog] = useState(false);
-  const [securityEventCount, setSecurityEventCount] = useState(0);
-  const [isMobile, setIsMobile] = useState(false);
-  const [mobileWarningDismissed, setMobileWarningDismissed] = useState(false);
   const [interviewStartTime, setInterviewStartTime] = useState<number | null>(null);
   const [timeElapsed, setTimeElapsed] = useState(0);
   const [toasts, setToasts] = useState<Array<{ id: string; message: string; type?: ToastType }>>([]);
-  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [questionDisplayedAt, setQuestionDisplayedAt] = useState<number | null>(null);
+  const [lastActivityAt, setLastActivityAt] = useState<number>(Date.now());
+  const [sessionTimeoutWarning, setSessionTimeoutWarning] = useState<number | null>(null); // Minutes remaining
 
   // Auto-save draft answer to localStorage
   useEffect(() => {
@@ -188,25 +227,6 @@ export default function InterviewClient({ sessionId }: { sessionId: string }) {
     }
   }, [data?.session.status, interviewStartTime]);
 
-  // Detect device type
-  useEffect(() => {
-    setIsMobile(isMobileDevice());
-    
-    // Log device info to security events on interview start
-    if (data?.session.status === "in_progress" && !isRecruiterView) {
-      const deviceInfo = getDeviceInfo();
-      fetch(`/api/sessions/${sessionId}/security-event`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ 
-          event: "device_detected", 
-          timestamp: Date.now(),
-          details: deviceInfo
-        }),
-      }).catch(() => {}); // Non-blocking
-    }
-  }, [sessionId, data?.session.status, isRecruiterView]);
-
   // Update elapsed time every second
   useEffect(() => {
     if (interviewStartTime && data?.session.status === "in_progress") {
@@ -237,23 +257,29 @@ export default function InterviewClient({ sessionId }: { sessionId: string }) {
     if (!res.ok) throw new Error(json.error || json.message || "Failed");
     // Handle standardized API response format
     const responseData = json.data || json;
-    
-    clientLogger.info("Refresh completed", { 
-      sessionId, 
-      hasQuestions: !!responseData?.questions, 
-      questionCount: responseData?.questions?.length || 0,
-      totalQuestions: responseData?.session?.totalQuestions || 0,
-      status: responseData?.session?.status,
-      hasCurrentQuestion: !!responseData?.currentQuestion
-    });
-    
     setData(responseData);
     setInitialLoading(false);
     setPresence(responseData.presence || null);
     setTabSwitchCount(responseData.session?.tabSwitchCount || 0);
-    
+
     if (responseData?.session?.status === "completed") {
-      fetchReport().catch(() => {});
+      // Check if we have a report
+      try {
+        const res = await fetch(`/api/sessions/${sessionId}/report`);
+        const json = await res.json().catch(() => ({}));
+        const reportData = json.data || json;
+
+        if (reportData.report) {
+          setReport(reportData.report);
+          setReportScoreSummary(reportData.scoreSummary ?? null);
+          setShareToken(reportData.shareToken ?? null);
+        } else {
+          // Generate it if missing
+          generateReport();
+        }
+      } catch (e) {
+        console.error("Failed to check report status", e);
+      }
     }
   }
 
@@ -277,19 +303,22 @@ export default function InterviewClient({ sessionId }: { sessionId: string }) {
     setReportLoading(false);
     setIsTyping(false);
     if (!res.ok) {
-      setReportError(json.error || "Failed to generate report");
+      setReportError(json.error || json.message || "Failed to generate report");
       return;
     }
-    setReport(json.report);
-    setShareToken(json.shareToken ?? null);
+    // Handle standardized API response format
+    const responseData = json.data || json;
+    setReport(responseData.report ?? null);
+    setShareToken(responseData.shareToken ?? null);
     setSuccessMessage("Report generated successfully");
     setTimeout(() => setSuccessMessage(null), 3000);
     // Fetch score summary from report endpoint
     const reportRes = await fetch(`/api/sessions/${sessionId}/report`);
     const reportJson = await reportRes.json().catch(() => ({}));
     if (reportRes.ok) {
-      setReportScoreSummary(reportJson.scoreSummary ?? null);
-      setShareToken(reportJson.shareToken ?? null);
+      const reportData = reportJson.data || reportJson;
+      setReportScoreSummary(reportData.scoreSummary ?? null);
+      setShareToken(reportData.shareToken ?? null);
     }
   }
 
@@ -301,7 +330,6 @@ export default function InterviewClient({ sessionId }: { sessionId: string }) {
     try {
       await navigator.clipboard.writeText(shareUrl);
       setCopySuccess(true);
-      addToast("Share link copied to clipboard", "success");
       setTimeout(() => setCopySuccess(false), 2000);
     } catch {
       // Fallback: select text
@@ -314,7 +342,6 @@ export default function InterviewClient({ sessionId }: { sessionId: string }) {
       try {
         document.execCommand("copy");
         setCopySuccess(true);
-        addToast("Share link copied to clipboard", "success");
         setTimeout(() => setCopySuccess(false), 2000);
       } catch {
         // Ignore
@@ -324,155 +351,60 @@ export default function InterviewClient({ sessionId }: { sessionId: string }) {
   }
 
   async function startInterview() {
-    console.log(`[CLIENT] startInterview called for session ${sessionId}`);
-    clientLogger.info("startInterview function called", { sessionId });
-    setError(null);
-    setLoading(true);
-    setIsTyping(true);
-    
-    // Enter fullscreen mode when interview begins (non-blocking)
+    // Request fullscreen (Must be first to be close to user gesture)
     try {
       if (document.documentElement.requestFullscreen) {
-        await document.documentElement.requestFullscreen().catch(() => {});
+        await document.documentElement.requestFullscreen();
       } else if ((document.documentElement as any).webkitRequestFullscreen) {
-        await (document.documentElement as any).webkitRequestFullscreen().catch(() => {});
-      } else if ((document.documentElement as any).mozRequestFullScreen) {
-        await (document.documentElement as any).mozRequestFullScreen().catch(() => {});
-      } else if ((document.documentElement as any).msRequestFullscreen) {
-        await (document.documentElement as any).msRequestFullscreen().catch(() => {});
+        await (document.documentElement as any).webkitRequestFullscreen(); // Safari
       }
-      setFullScreenMode(true);
-    } catch (error) {
-      // Fullscreen request failed (user may have denied permission) - non-blocking
-      clientLogger.warn("Could not enter fullscreen", { error: error instanceof Error ? error.message : String(error) });
+    } catch (e) {
+      console.warn("Fullscreen request failed", e);
     }
-    
+
+    setError(null);
+    setLoading(true);
+    // Don't set isTyping here - it should only be set when actually generating questions
+    // setIsTyping(true);
+
     try {
-      const startUrl = `/api/sessions/${sessionId}/start`;
-      console.log(`[CLIENT] Making POST request to ${startUrl}`);
-      clientLogger.info("Making POST request to start interview", { sessionId, url: startUrl });
-      
-      // Detect production environment for timeout and delays
-      const isProduction = window.location.hostname !== 'localhost' && !window.location.hostname.includes('127.0.0.1');
-      const timeout = isProduction ? 60000 : 30000; // 60s in prod, 30s in dev
-      const initialDelay = isProduction ? 3000 : 2000;
-      const refreshDelay = isProduction ? 1500 : 1000;
-      
-      const result = await retryWithBackoff(
-        async () => {
-          console.log(`[CLIENT] Fetching ${startUrl}...`);
-          const controller = new AbortController();
-          const timeoutId = setTimeout(() => controller.abort(), timeout);
-          
-          try {
-            const res = await fetch(`/api/sessions/${sessionId}/start`, {
-              method: "POST",
-              signal: controller.signal,
-            });
-            
-            clearTimeout(timeoutId);
-            
-            console.log(`[CLIENT] Response status: ${res.status}`);
-            const json = await res.json().catch((e) => {
-              console.error(`[CLIENT] Failed to parse JSON:`, e);
-              return {};
-            });
-            console.log(`[CLIENT] Response JSON:`, json);
-            
-            if (!res.ok) {
-              console.error(`[CLIENT] Request failed with status ${res.status}:`, json);
-              const error = new Error(json.error || json.message || `Failed to start interview (${res.status})`);
-              (error as any).status = res.status;
-              
-              // Don't retry on client errors (4xx) - these are permanent errors
-              if (res.status >= 400 && res.status < 500) {
-                throw error;
-              }
-              
-              // Only retry on server errors (5xx) or network issues
-              throw error;
-            }
-            
-            // Parse the response
-            const responseData = json.data || json;
-            return responseData;
-          } catch (fetchError: any) {
-            clearTimeout(timeoutId);
-            if (fetchError.name === 'AbortError') {
-              const timeoutError = new Error('Request timeout');
-              (timeoutError as any).status = 504;
-              throw timeoutError;
-            }
-            throw fetchError;
-          }
-        },
-        {
-          maxRetries: isProduction ? 3 : 2,
-          initialDelay: 1000,
-          timeout: timeout,
-          onRetry: (attempt, error) => {
-            // Only show retry message for retryable errors
-            if (isRetryableError(error)) {
-              addToast(`Retrying... (attempt ${attempt}/${isProduction ? 3 : 2})`, "info");
-              clientLogger.info("Retrying start interview", { sessionId, attempt, error: error?.message });
-            }
-          },
-        }
-      );
-      
-      console.log(`[CLIENT] Interview start API call successful:`, result);
-      clientLogger.info("Interview start API call successful", { sessionId, result });
-      
-      // Wait longer for database replication to complete (read replica lag)
-      // Production typically has more read replica lag
-      console.log(`[CLIENT] Waiting ${initialDelay}ms for database replication... (production: ${isProduction})`);
-      await new Promise(resolve => setTimeout(resolve, initialDelay));
-      
-      // Refresh and wait for it to complete
-      console.log(`[CLIENT] First refresh...`);
-      await refresh();
-      
-      // Wait a bit more for state to update
-      console.log(`[CLIENT] Waiting ${refreshDelay}ms before second refresh...`);
-      await new Promise(resolve => setTimeout(resolve, refreshDelay));
-      
-      // Refresh one more time to ensure we have the latest data
-      console.log(`[CLIENT] Second refresh...`);
-      await refresh();
-      
-      // One final refresh after another delay (only in production)
-      if (isProduction) {
-        console.log(`[CLIENT] Waiting ${refreshDelay}ms before final refresh (production)...`);
-        await new Promise(resolve => setTimeout(resolve, refreshDelay));
-        console.log(`[CLIENT] Final refresh...`);
-        await refresh();
+      const res = await fetch(`/api/sessions/${sessionId}/start`, {
+        method: "POST",
+      });
+
+      let json: any = {};
+      try {
+        json = await res.json();
+      } catch (e) {
+        clientLogger.error("Failed to parse response", e instanceof Error ? e : new Error(String(e)), { sessionId });
+        setError("Failed to parse server response");
+        setLoading(false);
+        return;
       }
-      
+
+      if (!res.ok) {
+        const errorMsg = json.error || `Failed to start interview (${res.status})`;
+        setError(errorMsg);
+        addToast(errorMsg, "error");
+        setLoading(false);
+        return;
+      }
+
+      addToast("Interview started successfully", "success");
+
+      // Wait a bit for database to update, then refresh
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      await refresh();
+
       // Reset loading state after refresh
       setLoading(false);
-      setIsTyping(false);
     } catch (error) {
-      const err = error instanceof Error ? error : new Error(String(error));
-      console.error(`[CLIENT] Failed to start interview:`, err);
-      clientLogger.error("Failed to start interview after retries", err, { 
-        sessionId,
-        errorMessage: err.message,
-        errorStack: err.stack
-      });
-      
-      let errorMsg = "Failed to start interview. ";
-      if (isRetryableError(error)) {
-        errorMsg += "Please check your connection and try again.";
-      } else {
-        errorMsg += err.message || "An unexpected error occurred.";
-      }
-      
+      clientLogger.error("Network error starting interview", error instanceof Error ? error : new Error(String(error)), { sessionId });
+      const errorMsg = "Network error. Please check your connection and try again.";
       setError(errorMsg);
       addToast(errorMsg, "error");
       setLoading(false);
       setIsTyping(false);
-      
-      // Don't reset to show rules modal - keep the error visible
     }
   }
 
@@ -487,7 +419,7 @@ export default function InterviewClient({ sessionId }: { sessionId: string }) {
 
   async function previousQuestion() {
     if (!data || data.session.currentQuestionIndex === 0) return;
-    
+
     setError(null);
     setLoading(true);
     setIsTyping(true);
@@ -502,7 +434,8 @@ export default function InterviewClient({ sessionId }: { sessionId: string }) {
       return;
     }
     await refresh();
-    setTimeout(() => setIsTyping(false), 500);
+    addToast("Moved to previous question", "info");
+    setIsTyping(false);
   }
 
   async function nextQuestion() {
@@ -521,8 +454,7 @@ export default function InterviewClient({ sessionId }: { sessionId: string }) {
       return;
     }
     await refresh();
-    // Small delay to show typing indicator
-    setTimeout(() => setIsTyping(false), 500);
+    setIsTyping(false);
   }
 
   async function jumpToQuestion(targetIndex: number) {
@@ -532,7 +464,7 @@ export default function InterviewClient({ sessionId }: { sessionId: string }) {
     setError(null);
     setLoading(true);
     const diff = targetIndex - data.session.currentQuestionIndex;
-    
+
     try {
       if (diff > 0) {
         // Move forward
@@ -546,6 +478,7 @@ export default function InterviewClient({ sessionId }: { sessionId: string }) {
         }
       }
       await refresh();
+      addToast(`Jumped to question ${targetIndex + 1}`, "info");
     } catch (error) {
       addToast("Failed to jump to question", "error");
     } finally {
@@ -555,23 +488,24 @@ export default function InterviewClient({ sessionId }: { sessionId: string }) {
 
   async function submitAnswer() {
     // Prevent double submission
-    if (isSubmitting) {
+    if (loading) return;
+
+    // Client-side validation
+    if (answerText.trim().length < 10) {
+      const msg = "Answer is too short. Please provide at least 10 characters.";
+      setError(msg);
+      addToast(msg, "warning");
       return;
     }
-    
+
     setError(null);
-    
-    // Basic client-side validation
-    if (!answerText || !answerText.trim()) {
-      const errorMsg = "Please enter an answer before submitting";
-      setError(errorMsg);
-      addToast(errorMsg, "error");
-      return;
-    }
-    
-    setIsSubmitting(true);
     setLoading(true);
     setIsTyping(true);
+
+    // Ensure we have a questionDisplayedAt timestamp
+    const displayedAt = questionDisplayedAt ||
+      (data?.session.startedAt ? data.session.startedAt : Date.now());
+    const finalDisplayedAt = displayedAt > 0 ? displayedAt : Date.now() - 1000;
 
     // Clear draft from localStorage
     if (data?.currentQuestion?.id) {
@@ -580,143 +514,81 @@ export default function InterviewClient({ sessionId }: { sessionId: string }) {
     }
 
     try {
-      // Detect production environment for timeout
-      const isProduction = window.location.hostname !== 'localhost' && !window.location.hostname.includes('127.0.0.1');
-      const timeout = isProduction ? 60000 : 30000; // 60s in prod, 30s in dev
-      
-      const result = await retryWithBackoff(
-        async () => {
-          const controller = new AbortController();
-          const timeoutId = setTimeout(() => controller.abort(), timeout);
-          
-          try {
-            const res = await fetch(`/api/sessions/${sessionId}/answer`, {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ answerText: answerText.trim() }),
-              signal: controller.signal,
-            });
-            
-            clearTimeout(timeoutId);
+      const res = await fetch(`/api/sessions/${sessionId}/answer`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          answerText: answerText.trim(),
+          questionDisplayedAt: finalDisplayedAt,
+        }),
+      });
 
-            const json = (await res.json().catch(() => ({}))) as Partial<EvalResp> & {
-              error?: string;
-              message?: string;
-              details?: string;
-              data?: any;
-            };
+      const json = await res.json().catch(() => ({}));
+      const responseData = json.data || json;
+      const errorMsg = json.message || json.error;
 
-            if (!res.ok) {
-              const errorMsg = json.error || json.message || json.details || `Failed to submit answer (${res.status})`;
-              const error = new Error(errorMsg);
-              (error as any).status = res.status;
-              
-              // Don't retry on client errors (4xx) - these are permanent errors
-              if (res.status >= 400 && res.status < 500) {
-                throw error;
-              }
-              
-              // Only retry on server errors (5xx) or network issues
-              throw error;
-            }
+      if (!res.ok) {
+        const finalErrorMsg = errorMsg || "Failed to submit answer";
+        setError(finalErrorMsg);
+        addToast(finalErrorMsg, "error");
+        setLoading(false);
+        setIsTyping(false);
+        return;
+      }
 
-            return { res, json };
-          } catch (fetchError: any) {
-            clearTimeout(timeoutId);
-            if (fetchError.name === 'AbortError') {
-              const timeoutError = new Error('Request timeout');
-              (timeoutError as any).status = 504;
-              throw timeoutError;
-            }
-            throw fetchError;
-          }
-        },
-        {
-          maxRetries: 2, // Fewer retries for answer submission
-          initialDelay: 500,
-          onRetry: (attempt) => {
-            addToast(`Retrying submission... (attempt ${attempt}/2)`, "info");
-          },
-        }
-      );
+      // Success - optimistically update state from API response
+      const evalResponse: EvalResp = {
+        ok: true,
+        evaluation: responseData.evaluation,
+        scoreSummary: responseData.scoreSummary,
+        advancedToIndex: responseData.advancedToIndex,
+        status: responseData.status,
+      };
 
-      // Handle successful response
-      const { json } = result;
-      const responseData = (json as any).data || json;
-      setLastEval(responseData as EvalResp);
+      setLastEval(evalResponse);
       setAnswerText("");
+      setQuestionDisplayedAt(null);
       setShowConfirmDialog(false);
-      
-      // Update state immediately with the advanced index from response
-      // This ensures UI updates immediately even if refresh gets stale data
-      if (responseData.advancedToIndex !== undefined && data) {
-        console.log(`[CLIENT] Updating state immediately - advancedToIndex: ${responseData.advancedToIndex}, status: ${responseData.status}`);
+      addToast("Answer submitted and evaluated", "success");
+
+      // Optimistically update the current state without a full refresh
+      if (data && responseData.advancedToIndex !== undefined && responseData.status) {
         setData({
           ...data,
           session: {
             ...data.session,
             currentQuestionIndex: responseData.advancedToIndex,
-            status: responseData.status || data.session.status,
+            status: responseData.status,
           },
+          currentQuestion: data.questions?.[responseData.advancedToIndex] ? {
+            id: data.questions[responseData.advancedToIndex].id,
+            text: data.questions[responseData.advancedToIndex].text,
+            category: data.questions[responseData.advancedToIndex].category,
+            difficulty: data.questions[responseData.advancedToIndex].difficulty,
+          } : null,
+          scoreSummary: responseData.scoreSummary,
         });
       }
-      
-      // Wait longer for database replication, then refresh to get full updated state
-      // Use longer delay to handle read replica lag
-      console.log(`[CLIENT] Waiting 2 seconds for database replication before refresh...`);
-      await new Promise(resolve => setTimeout(resolve, 2000));
-      
-      // Refresh to get full updated state (evaluation, score summary, etc.)
-      console.log(`[CLIENT] Refreshing session data...`);
-      await refresh();
-      
-      // If refresh returned stale data, restore the correct index from the response
-      // This handles cases where read replica lag causes refresh to return old data
-      if (responseData.advancedToIndex !== undefined && data) {
-        setTimeout(() => {
-          setData((prevData) => {
-            if (prevData && prevData.session.currentQuestionIndex !== responseData.advancedToIndex) {
-              console.log(`[CLIENT] Refresh returned stale data (index: ${prevData.session.currentQuestionIndex}), restoring correct index: ${responseData.advancedToIndex}`);
-              return {
-                ...prevData,
-                session: {
-                  ...prevData.session,
-                  currentQuestionIndex: responseData.advancedToIndex,
-                  status: responseData.status || prevData.session.status,
-                },
-              };
-            }
-            return prevData;
-          });
-        }, 100);
-      }
-      setTimeout(() => {
-        setIsTyping(false);
-        setLoading(false);
-        setIsSubmitting(false);
-      }, 500);
-    } catch (error) {
-      const err = error instanceof Error ? error : new Error(String(error));
-      let errorMsg = err.message || "Failed to submit answer. Please try again.";
-      
-      // Handle timeout specifically
-      if (err.message === 'Request timeout' || err.message.includes('timeout')) {
-        errorMsg = "Request timed out. Please try again.";
-      }
-      
-      setError(errorMsg);
-      addToast(errorMsg, "error");
+
       setIsTyping(false);
       setLoading(false);
-      setIsSubmitting(false);
-      clientLogger.error("Answer submission failed after retries", err, { 
-        sessionId,
-        errorMessage: err.message
-      });
+
+      // Refresh in background to sync any missed updates (non-blocking, silent)
+      refresh().catch(() => { });
+    } catch (err) {
+      const errorMsg = err instanceof Error ? err.message : "Network error occurred";
+      setError(errorMsg);
+      addToast(errorMsg, "error");
+      setLoading(false);
+      setIsTyping(false);
     }
   }
 
   const handleSubmitClick = () => {
+    if (answerText.trim().length < 10) {
+      addToast("Answer is too short. Please provide at least 10 characters.", "warning");
+      return;
+    }
     setShowConfirmDialog(true);
   };
 
@@ -736,6 +608,51 @@ export default function InterviewClient({ sessionId }: { sessionId: string }) {
   const completed = data?.session.status === "completed";
   const currentQuestionNum = (data?.session.currentQuestionIndex ?? 0) + 1;
 
+  // Security Monitors (Fullscreen, Tab Switch, Copy/Paste)
+  useEffect(() => {
+    if (!started || completed || isRecruiterView) return;
+
+    // Detect Tab Switching
+    const handleVisibilityChange = () => {
+      if (document.hidden) {
+        setTabSwitchCount(prev => {
+          const newCount = prev + 1;
+          if (newCount > 3 && !tabSwitchWarning) {
+            setTabSwitchWarning("Frequent tab switching detected. This incident will be reported.");
+          }
+          // Persist tab switch count to server in background if possible, or local state used in next submit
+          return newCount;
+        });
+        addToast("Warning: Tab switching is monitored.", "warning");
+      }
+    };
+
+    // Detect Fullscreen Exit
+    const handleFullscreenChange = () => {
+      if (!document.fullscreenElement && !(document as any).webkitFullscreenElement) {
+        addToast("Please maintain fullscreen mode for the duration of the interview.", "warning");
+      }
+    };
+
+    // Detect Copy
+    const handleCopy = (e: ClipboardEvent) => {
+      // Log copy attempt
+      addToast("Copying content is monitored.", "warning");
+    };
+
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    document.addEventListener("fullscreenchange", handleFullscreenChange);
+    document.addEventListener("webkitfullscreenchange", handleFullscreenChange); // Safari
+    document.addEventListener("copy", handleCopy);
+
+    return () => {
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+      document.removeEventListener("fullscreenchange", handleFullscreenChange);
+      document.removeEventListener("webkitfullscreenchange", handleFullscreenChange);
+      document.removeEventListener("copy", handleCopy);
+    };
+  }, [started, completed, isRecruiterView, tabSwitchWarning]);
+
   // Beforeunload warning during active interview
   useEffect(() => {
     if (data?.session.status === "in_progress" && !completed) {
@@ -750,36 +667,11 @@ export default function InterviewClient({ sessionId }: { sessionId: string }) {
     }
   }, [data?.session.status, completed]);
 
-  // Listen for fullscreen changes
-  useEffect(() => {
-    const handleFullscreenChange = () => {
-      const isFullscreen = !!(
-        document.fullscreenElement ||
-        (document as any).webkitFullscreenElement ||
-        (document as any).mozFullScreenElement ||
-        (document as any).msFullscreenElement
-      );
-      setFullScreenMode(isFullscreen);
-    };
-
-    document.addEventListener("fullscreenchange", handleFullscreenChange);
-    document.addEventListener("webkitfullscreenchange", handleFullscreenChange);
-    document.addEventListener("mozfullscreenchange", handleFullscreenChange);
-    document.addEventListener("MSFullscreenChange", handleFullscreenChange);
-
-    return () => {
-      document.removeEventListener("fullscreenchange", handleFullscreenChange);
-      document.removeEventListener("webkitfullscreenchange", handleFullscreenChange);
-      document.removeEventListener("mozfullscreenchange", handleFullscreenChange);
-      document.removeEventListener("MSFullscreenChange", handleFullscreenChange);
-    };
-  }, []);
-
   // Keyboard shortcuts
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       // Enter to submit (with Ctrl/Cmd to avoid accidental submits)
-      if ((e.ctrlKey || e.metaKey) && e.key === 'Enter' && !isSubmitting && !loading && !completed && answerText.trim()) {
+      if ((e.ctrlKey || e.metaKey) && e.key === 'Enter' && !loading && !completed && answerText.trim()) {
         e.preventDefault();
         handleSubmitClick();
       }
@@ -792,7 +684,74 @@ export default function InterviewClient({ sessionId }: { sessionId: string }) {
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isSubmitting, loading, completed, answerText, showConfirmDialog, handleSubmitClick]);
+  }, [loading, completed, answerText, showConfirmDialog, handleSubmitClick]);
+
+  // Track when question is displayed
+  useEffect(() => {
+    if (data?.currentQuestion?.id && data?.session.status === "in_progress") {
+      const now = Date.now();
+      // Only update if this is a new question (different from previous)
+      if (data.currentQuestion.id !== previousQuestionId) {
+        setQuestionDisplayedAt(now);
+        setLastActivityAt(now);
+        setPreviousQuestionId(data.currentQuestion.id);
+      }
+    }
+  }, [data?.currentQuestion?.id, data?.session.status, previousQuestionId]);
+
+  // Track user activity for session timeout
+  useEffect(() => {
+    if (data?.session.status === "in_progress" && !completed) {
+      const handleActivity = () => {
+        setLastActivityAt(Date.now());
+      };
+
+      // Track various user interactions
+      window.addEventListener('mousedown', handleActivity);
+      window.addEventListener('keydown', handleActivity);
+      window.addEventListener('scroll', handleActivity);
+      window.addEventListener('touchstart', handleActivity);
+
+      return () => {
+        window.removeEventListener('mousedown', handleActivity);
+        window.removeEventListener('keydown', handleActivity);
+        window.removeEventListener('scroll', handleActivity);
+        window.removeEventListener('touchstart', handleActivity);
+      };
+    }
+  }, [data?.session.status, completed]);
+
+  // Session timeout check (30 minutes inactivity)
+  useEffect(() => {
+    if (data?.session.status === "in_progress" && !completed) {
+      const TIMEOUT_MS = 30 * 60 * 1000; // 30 minutes
+      const WARNING_MS = 5 * 60 * 1000; // Warn 5 minutes before timeout
+
+      const checkTimeout = () => {
+        const now = Date.now();
+        const inactiveTime = now - lastActivityAt;
+        const timeRemaining = TIMEOUT_MS - inactiveTime;
+        const minutesRemaining = Math.ceil(timeRemaining / 60000);
+
+        if (timeRemaining <= 0) {
+          // Session expired
+          addToast("Session expired due to inactivity. Please refresh to continue.", "warning");
+          setSessionTimeoutWarning(0);
+        } else if (timeRemaining <= WARNING_MS && minutesRemaining !== sessionTimeoutWarning) {
+          // Show warning
+          setSessionTimeoutWarning(minutesRemaining);
+          addToast(`Session will expire in ${minutesRemaining} minute${minutesRemaining > 1 ? 's' : ''} due to inactivity.`, "warning");
+        } else if (timeRemaining > WARNING_MS) {
+          setSessionTimeoutWarning(null);
+        }
+      };
+
+      const interval = setInterval(checkTimeout, 60000); // Check every minute
+      checkTimeout(); // Initial check
+
+      return () => clearInterval(interval);
+    }
+  }, [data?.session.status, completed, lastActivityAt, sessionTimeoutWarning]);
 
   // Show presence modal on first load if not dismissed
   useEffect(() => {
@@ -820,93 +779,13 @@ export default function InterviewClient({ sessionId }: { sessionId: string }) {
     }
   }, [data?.currentQuestion?.id, previousQuestionId]);
 
-  // Tab switch tracking (visibility API)
-  useEffect(() => {
-    if (!started || completed || isRecruiterView) return;
-
-    const handleVisibilityChange = async () => {
-      if (document.hidden) {
-        // Tab switched away (blur)
-        try {
-          const res = await fetch(`/api/sessions/${sessionId}/tab-switch`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ type: "blur", timestamp: Date.now() }),
-          });
-          const data = await res.json();
-          if (data.success && data.data) {
-            const newCount = data.data.tabSwitchCount || 0;
-            setTabSwitchCount(newCount);
-            if (data.data.warning) {
-              setTabSwitchWarning(data.data.warning);
-              // Show toast for warnings
-              if (newCount > 3) {
-                addToast(data.data.warning, "warning");
-              }
-            } else {
-              setTabSwitchWarning(null);
-            }
-          }
-        } catch (err) {
-          clientLogger.error("Failed to log tab switch", err instanceof Error ? err : new Error(String(err)));
-        }
-      } else {
-        // Tab switched back (focus)
-        try {
-          await fetch(`/api/sessions/${sessionId}/tab-switch`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ type: "focus", timestamp: Date.now() }),
-          });
-        } catch (err) {
-          clientLogger.error("Failed to log tab focus", err instanceof Error ? err : new Error(String(err)));
-        }
-      }
-    };
-
-    const handleBlur = () => {
-      if (document.hidden) return; // Already handled by visibilitychange
-      handleVisibilityChange();
-    };
-
-    document.addEventListener("visibilitychange", handleVisibilityChange);
-    window.addEventListener("blur", handleBlur);
-
-    return () => {
-      document.removeEventListener("visibilitychange", handleVisibilityChange);
-      window.removeEventListener("blur", handleBlur);
-    };
-  }, [sessionId, started, completed, isRecruiterView, refresh]);
-
-  // Handle security events - only count critical events, not routine checks
-  const handleSecurityEvent = (event: string) => {
-    // Only count actual security violations, not routine monitoring
-    const criticalEvents = [
-      "devtools_detected",
-      "screenshot_attempt",
-      "clipboard_write_attempt",
-      "keyboard_shortcut_blocked",
-      "right_click_blocked"
-    ];
-    
-    if (criticalEvents.includes(event)) {
-      setSecurityEventCount(prev => prev + 1);
-      
-      // Show toast for critical events
-      if (["devtools_detected", "screenshot_attempt"].includes(event)) {
-        addToast(`Security alert: ${event.replace(/_/g, ' ')}`, "error");
-      }
-    }
-    // Don't count routine checks like presence checks, idle detection, etc.
-  };
-
   const scoreSummary = reportScoreSummary || data?.scoreSummary || lastEval?.scoreSummary;
   const lowestScore = scoreSummary
     ? Math.min(
-        scoreSummary.avg.technical,
-        scoreSummary.avg.communication,
-        scoreSummary.avg.problemSolving
-      )
+      scoreSummary.avg.technical,
+      scoreSummary.avg.communication,
+      scoreSummary.avg.problemSolving
+    )
     : null;
   const commsIsLowest =
     scoreSummary &&
@@ -929,38 +808,9 @@ export default function InterviewClient({ sessionId }: { sessionId: string }) {
   const showTyping = isTyping && !!data?.currentQuestion && !loading;
 
   return (
-    <div 
-      className="space-y-6"
-      style={started && !completed && !isRecruiterView ? { 
-        userSelect: 'none',
-        WebkitUserSelect: 'none',
-        MozUserSelect: 'none',
-        msUserSelect: 'none'
-      } : {}}
-    >
-      {/* Security Monitor - Only active during interview */}
-      {started && !completed && !isRecruiterView && (
-        <SecurityMonitor 
-          sessionId={sessionId} 
-          enabled={true}
-          onSecurityEvent={handleSecurityEvent}
-        />
-      )}
-      
+    <div className={`space-y-6 ${focusMode ? "bg-slate-50 p-4 rounded-lg" : ""}`}>
       {/* Toast Manager */}
-      <ToastManager toasts={toasts} onRemove={removeToast} />
-
-      {/* Interview Rules Modal */}
-      {showRulesModal && (
-        <InterviewRulesModal
-          sessionId={sessionId}
-          onAccept={() => {
-            setShowRulesModal(false);
-            startInterview();
-          }}
-          onDecline={() => setShowRulesModal(false)}
-        />
-      )}
+      <ToastContainer toasts={toasts} onClose={removeToast} />
 
       {/* Presence Modal */}
       {showPresenceModal && (
@@ -972,479 +822,389 @@ export default function InterviewClient({ sessionId }: { sessionId: string }) {
         />
       )}
 
-      {/* Mobile Device Warning Banner */}
-      {isMobile && !mobileWarningDismissed && started && !completed && !isRecruiterView && (
-        <div className="bg-yellow-50 border-l-4 border-yellow-400 p-4 rounded-lg">
-          <div className="flex items-start justify-between gap-4">
-            <div className="flex-1">
-              <p className="text-sm font-medium text-yellow-800 flex items-center gap-2">
-                <span>⚠️</span> Desktop Recommended
-              </p>
-              <p className="text-sm text-yellow-700 mt-1">
-                For the best interview experience and security, please use a desktop or laptop computer. 
-                Some security features may be limited on mobile devices, and typing long answers may be difficult.
-              </p>
-            </div>
-            <button
-              onClick={() => setMobileWarningDismissed(true)}
-              className="text-yellow-800 hover:text-yellow-900 text-xl font-bold leading-none flex-shrink-0"
-              aria-label="Dismiss warning"
-            >
-              ×
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* Top Header Bar */}
-      <div className="sticky top-0 z-10 bg-[var(--bg)]/95 backdrop-blur-md border-b border-[var(--border)] py-4 -mx-4 px-4 mb-6">
+      {/* Top Header Bar - Modern */}
+      <div className="sticky top-0 z-10 bg-slate-950/80 backdrop-blur-md border-b border-white/10 py-4 -mx-4 px-4 mb-8 shadow-sm">
         <div className="flex items-center justify-between">
           <div>
-            <h1 className="text-lg font-semibold text-[var(--text)]">Interview Session</h1>
-            <p className="text-xs text-[var(--muted)] mt-0.5">AI-Powered Assessment</p>
+            <h1 className="text-2xl font-bold text-white mb-1">AI Interview Platform</h1>
+            <p className="text-sm text-slate-400 font-medium">Professional Interview Experience</p>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-3">
             {presence?.completedAt && (
-              <Badge variant="success" className="app-badge flex items-center gap-1.5">
-                <Shield className="w-3 h-3" />
-                Verified
-              </Badge>
+              <Badge variant="success" className="app-badge px-3 py-1.5 shadow-sm font-semibold">Presence Verified</Badge>
             )}
             {timeElapsed > 0 && data?.session.status === "in_progress" && (
-              <Badge variant="info" className="app-badge flex items-center gap-1.5">
-                <Timer className="w-3 h-3" />
-                {formatTime(timeElapsed)}
+              <div className="px-4 py-2 bg-slate-100 rounded-xl border border-slate-200 shadow-sm">
+                <span className="text-sm font-semibold text-slate-700" title="Time elapsed">
+                  ⏱️ {formatTime(timeElapsed)}
+                </span>
+              </div>
+            )}
+            {tabSwitchCount > 0 && !isRecruiterView && data?.session.status === "in_progress" && (
+              <Badge
+                variant={tabSwitchCount > 3 ? "error" : "warning"}
+                className="app-badge px-3 py-1.5 shadow-sm font-semibold"
+              >
+                {tabSwitchCount} Switch{tabSwitchCount > 1 ? "es" : ""}
               </Badge>
             )}
-            <Badge variant={getStatusBadgeVariant(data?.session.status || "created")} className="app-badge">
+            <Badge variant={getStatusBadgeVariant(data?.session.status || "created")} className="app-badge px-3 py-1.5 shadow-sm font-semibold">
               {data?.session.status === "in_progress"
                 ? "In Progress"
                 : data?.session.status === "completed"
-                ? "Completed"
-                : "Ready"}
+                  ? "Completed"
+                  : "Created"}
             </Badge>
             {started && !completed && (
-              <button
-                onClick={async () => {
-                  const enabled = !fullScreenMode;
-                  setFullScreenMode(enabled);
-                  try {
-                    if (enabled) {
-                      if (document.documentElement.requestFullscreen) {
-                        await document.documentElement.requestFullscreen();
-                      } else if ((document.documentElement as any).webkitRequestFullscreen) {
-                        await (document.documentElement as any).webkitRequestFullscreen();
-                      } else if ((document.documentElement as any).mozRequestFullScreen) {
-                        await (document.documentElement as any).mozRequestFullScreen();
-                      } else if ((document.documentElement as any).msRequestFullscreen) {
-                        await (document.documentElement as any).msRequestFullscreen();
-                      }
-                    } else {
-                      if (document.exitFullscreen) {
-                        await document.exitFullscreen();
-                      } else if ((document as any).webkitExitFullscreen) {
-                        await (document as any).webkitExitFullscreen();
-                      } else if ((document as any).mozCancelFullScreen) {
-                        await (document as any).mozCancelFullScreen();
-                      } else if ((document as any).msExitFullscreen) {
-                        await (document as any).msExitFullscreen();
-                      }
-                    }
-                  } catch (error) {
-                    console.error("Fullscreen error:", error);
-                    setFullScreenMode(!enabled);
-                  }
-                }}
-                className="flex items-center gap-2 px-3 py-1.5 rounded-lg hover:bg-[var(--card)] transition-colors border border-[var(--border)]"
-                title={fullScreenMode ? "Exit Full Screen" : "Enter Full Screen"}
-              >
-                {fullScreenMode ? (
-                  <>
-                    <Minimize2 className="w-4 h-4 text-[var(--text)]" />
-                    <span className="text-xs text-[var(--text)]">Exit Full Screen</span>
-                  </>
-                ) : (
-                  <>
-                    <Maximize2 className="w-4 h-4 text-[var(--text)]" />
-                    <span className="text-xs text-[var(--text)]">Full Screen</span>
-                  </>
-                )}
-              </button>
+              <label className="flex items-center gap-2.5 cursor-pointer px-3 py-2 bg-slate-50 rounded-lg border border-slate-200 hover:bg-slate-100 transition-colors">
+                <input
+                  type="checkbox"
+                  checked={focusMode}
+                  onChange={(e) => setFocusMode(e.target.checked)}
+                  className="w-4 h-4 rounded border-slate-300 text-indigo-600 focus:ring-2 focus:ring-indigo-500 focus:ring-offset-0"
+                />
+                <span className="text-sm font-medium text-slate-700">Focus mode</span>
+              </label>
             )}
           </div>
         </div>
       </div>
 
-      {/* Confirmation Dialog */}
+      {/* Confirmation Dialog - Modern */}
       {showConfirmDialog && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-          <Card className="max-w-md w-full mx-4">
-            <h3 className="text-lg font-semibold text-[var(--text)] mb-2">Confirm Submission</h3>
-            <p className="text-sm text-[var(--muted)] mb-4">
-              Are you sure you want to submit this answer? You won't be able to edit it after submission.
-            </p>
-            <div className="flex gap-3 justify-end">
-              <button
-                onClick={() => setShowConfirmDialog(false)}
-                className="px-4 py-2 text-sm border border-[var(--border)] rounded-lg hover:bg-[var(--card)]"
-              >
-                Cancel (Esc)
-              </button>
-              <button
-                onClick={submitAnswer}
-                disabled={isSubmitting || loading}
-                className="app-btn-primary px-4 py-2 text-sm disabled:opacity-60 disabled:cursor-not-allowed"
-              >
-                {isSubmitting || loading ? "Submitting..." : "Submit Answer"}
-              </button>
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <Card className="max-w-md w-full mx-4 shadow-2xl border-0">
+            <div className="p-6">
+              <div className="w-16 h-16 mx-auto mb-4 rounded-2xl bg-gradient-to-br from-indigo-100 to-purple-100 flex items-center justify-center">
+                <Info className="w-8 h-8 text-indigo-600" />
+              </div>
+              <h3 className="text-xl font-bold text-white mb-2 text-center">Confirm Submission</h3>
+              <p className="text-sm text-slate-400 mb-6 text-center leading-relaxed">
+                Are you sure you want to submit this answer? You won't be able to edit it after submission.
+              </p>
+              <div className="flex gap-3">
+                <button
+                  onClick={() => setShowConfirmDialog(false)}
+                  className="flex-1 px-4 py-3 text-sm font-semibold border-2 border-slate-600 rounded-xl hover:bg-white/5 transition-colors text-slate-300"
+                >
+                  Cancel (Esc)
+                </button>
+                <button
+                  onClick={submitAnswer}
+                  disabled={loading}
+                  className="flex-1 px-4 py-3 text-sm font-semibold bg-gradient-to-r from-indigo-600 to-purple-600 text-white rounded-xl shadow-lg hover:shadow-xl hover:from-indigo-700 hover:to-purple-700 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {loading ? "Submitting..." : "Submit Answer"}
+                </button>
+              </div>
             </div>
           </Card>
         </div>
       )}
 
-      {/* Toast Messages */}
+      {/* Toast Messages - Modern */}
       {error && (
-        <div className="rounded-lg bg-red-50 border border-red-200 p-4 shadow-sm">
-          <p className="text-sm text-red-800 font-medium">{error}</p>
+        <div className="rounded-xl bg-gradient-to-r from-red-50 to-rose-50 border-2 border-red-200 p-5 shadow-lg mb-6">
+          <div className="flex items-start gap-3">
+            <div className="w-6 h-6 rounded-full bg-red-500 flex items-center justify-center flex-shrink-0">
+              <span className="text-white text-xs font-bold">!</span>
+            </div>
+            <p className="text-sm text-red-900 font-semibold flex-1">{error}</p>
+          </div>
         </div>
       )}
       {successMessage && (
-        <div className="rounded-lg bg-green-50 border border-green-200 p-4 shadow-sm">
-          <p className="text-sm text-green-800 font-medium">{successMessage}</p>
+        <div className="rounded-xl bg-[var(--success-bg)] border border-[var(--success)]/30 p-5 shadow-lg mb-6 backdrop-blur-md">
+          <div className="flex items-start gap-3">
+            <div className="w-6 h-6 rounded-full bg-[var(--success)] flex items-center justify-center flex-shrink-0">
+              <CheckCircle2 className="w-4 h-4 text-white" />
+            </div>
+            <p className="text-sm text-[var(--success)] font-semibold flex-1">{successMessage}</p>
+          </div>
         </div>
       )}
 
-      {/* Context Card - Professional Interview Header */}
-      <Card className="shadow-sm border border-[var(--border)] bg-gradient-to-r from-[var(--bg)] to-[var(--card)]">
-        <div className="flex items-center justify-between py-3">
-          <div className="flex items-center gap-8">
-            {/* Role & Level - Primary Info */}
-            {data?.session.role && (
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-lg bg-[var(--primary)]/10 flex items-center justify-center">
-                  <UserCircle className="w-5 h-5 text-[var(--primary)]" />
-                </div>
-                <div>
-                  <p className="text-xs text-[var(--muted)] font-medium">Position</p>
-                  <p className="text-base font-semibold text-[var(--text)]">{data.session.role}</p>
-                </div>
+      {/* Context Card - Modern */}
+      <Card className="shadow-lg border-0 bg-[var(--card)] mb-8 backdrop-blur-md">
+        <div className="flex flex-wrap items-center gap-6">
+          <div>
+            <p className="text-xs font-semibold text-[var(--muted)] mb-2 uppercase tracking-wide">Mode</p>
+            <Badge variant="info" className="px-3 py-1.5 shadow-sm font-semibold">
+              {data?.session.mode === "company"
+                ? "Company"
+                : data?.session.mode === "college"
+                  ? "College"
+                  : "Individual"}
+            </Badge>
+          </div>
+          {data?.session.role && (
+            <div>
+              <p className="text-xs font-semibold text-[var(--muted)] mb-2 uppercase tracking-wide">Role</p>
+              <p className="text-sm font-bold text-[var(--text)]">{data.session.role}</p>
+            </div>
+          )}
+          {data?.session.level && (
+            <div>
+              <p className="text-xs font-semibold text-[var(--muted)] mb-2 uppercase tracking-wide">Level</p>
+              <Badge className="px-3 py-1.5 shadow-sm font-semibold">{data.session.level}</Badge>
+            </div>
+          )}
+          <div className="ml-auto flex items-center gap-4">
+            {presence?.completedAt && (
+              <div>
+                <p className="text-xs font-semibold text-[var(--muted)] mb-2 uppercase tracking-wide">Presence</p>
+                <Badge variant="success" className="px-3 py-1.5 shadow-sm font-semibold">Verified</Badge>
               </div>
             )}
-
-            {data?.session.level && (
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-lg bg-[var(--primary)]/10 flex items-center justify-center">
-                  <Layers className="w-5 h-5 text-[var(--primary)]" />
-                </div>
-                <div>
-                  <p className="text-xs text-[var(--muted)] font-medium">Level</p>
-                  <p className="text-base font-semibold text-[var(--text)] capitalize">{data.session.level}</p>
-                </div>
-              </div>
-            )}
-
-            {/* Divider */}
-            {(data?.session.role || data?.session.level) && (
-              <div className="h-12 w-px bg-[var(--border)]" />
-            )}
-
-            {/* Status - Subtle Badge */}
-            <div className="flex items-center gap-2">
-              {data?.session.status === "completed" ? (
-                <CheckCircle2 className="w-4 h-4 text-[var(--success)]" />
-              ) : data?.session.status === "in_progress" ? (
-                <Clock className="w-4 h-4 text-[var(--primary)]" />
-              ) : null}
-              <Badge 
-                variant={getStatusBadgeVariant(data?.session.status || "created")} 
-                className="text-xs px-3 py-1"
-              >
+            <div>
+              <p className="text-xs font-semibold text-[var(--muted)] mb-2 uppercase tracking-wide">Status</p>
+              <Badge variant={getStatusBadgeVariant(data?.session.status || "created")} className="px-3 py-1.5 shadow-sm font-semibold">
                 {data?.session.status === "in_progress"
-                  ? "Interview in Progress"
+                  ? "In Progress"
                   : data?.session.status === "completed"
-                  ? "Interview Completed"
-                  : "Ready to Begin"}
+                    ? "Completed"
+                    : "Created"}
               </Badge>
             </div>
           </div>
-
-          {/* Presence Verification - Right Side */}
-          {presence?.completedAt && (
-            <div className="flex items-center gap-2 px-4 py-2 rounded-lg bg-[var(--success)]/10 border border-[var(--success)]/20">
-              <Shield className="w-4 h-4 text-[var(--success)]" />
-              <span className="text-xs font-medium text-[var(--success)]">Identity Verified</span>
-            </div>
-          )}
         </div>
+        {/* Session ID hidden for cleaner UX - available in URL */}
       </Card>
 
       {!started ? (
-        <Card>
+        <Card className="shadow-lg border-0 bg-[var(--card)]">
           {loading ? (
-            <div className="space-y-3">
-              <Skeleton className="h-6 w-48" />
-              <Skeleton className="h-4 w-full" />
-              <Skeleton className="h-10 w-32" />
+            <div className="p-8 text-center">
+              <div className="w-20 h-20 mx-auto mb-6 rounded-2xl bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center animate-pulse">
+                <div className="w-12 h-12 border-4 border-white border-t-transparent rounded-full animate-spin" />
+              </div>
+              <h3 className="text-xl font-bold text-[var(--text)] mb-4">Preparing Your Interview...</h3>
+              <div className="max-w-md mx-auto">
+                <LoadingTips />
+              </div>
             </div>
           ) : (
-            <>
-              <h3 className="text-lg font-semibold text-[var(--text)] mb-2">Ready to begin</h3>
-              <p className="text-sm text-[var(--muted)] mb-4">
-                Please review the interview rules and security guidelines before starting.
+            <div className="p-8 text-center">
+              <div className="w-20 h-20 mx-auto mb-6 rounded-2xl bg-[var(--primary-glow)] flex items-center justify-center">
+                <CheckCircle2 className="w-10 h-10 text-[var(--primary)]" />
+              </div>
+              <h2 className="text-2xl font-bold text-[var(--text)] mb-3">Ready to Begin</h2>
+              <p className="text-base text-[var(--muted)] mb-6 max-w-md mx-auto">
+                Click below to generate your personalized interview questions based on your profile and the job requirements.
               </p>
               <button
-                onClick={() => {
-                  console.log(`[CLIENT] Begin Interview button clicked for session ${sessionId}`);
-                  // Check if rules were already accepted
-                  const rulesAccepted = localStorage.getItem(`rulesAccepted:${sessionId}`);
-                  console.log(`[CLIENT] Rules accepted: ${rulesAccepted}`);
-                  if (rulesAccepted) {
-                    // Skip modal if already accepted
-                    console.log(`[CLIENT] Rules already accepted, calling startInterview directly`);
-                    startInterview();
-                  } else {
-                    // Show modal if not accepted
-                    console.log(`[CLIENT] Rules not accepted, showing modal`);
-                    setShowRulesModal(true);
-                  }
-                }}
+                onClick={startInterview}
                 disabled={loading}
-                className="app-btn-primary px-6 py-2.5 disabled:opacity-60 disabled:cursor-not-allowed"
+                className="app-btn-primary px-8 py-4 text-lg w-full sm:w-auto"
               >
-                {loading ? "Starting..." : "Review Rules & Begin Interview"}
+                {loading ? (
+                  <span className="flex items-center justify-center gap-2">
+                    <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                    Starting Interview...
+                  </span>
+                ) : (
+                  "Begin Interview"
+                )}
               </button>
-            </>
+            </div>
           )}
         </Card>
-      ) : !(completed && report) ? (
-        <div className="relative space-y-6">
-          {/* Main 2-Column Layout for Desktop */}
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 w-full">
-            {/* Left Column: AI Interviewer + Evaluation */}
-            <div className="space-y-6 flex flex-col">
-              {/* AI Interviewer Panel - Reduced size */}
-              <Card variant="elevated" className="flex-shrink-0">
-                <div className="scale-90 origin-top">
-                  <InterviewerPanel
-                    question={currentQuestionText}
-                    isTyping={showTyping}
-                    readAloud={readAloud}
-                    onReadAloudChange={setReadAloud}
-                    showVideoPlaceholder={true}
-                    cameraEnabled={cameraEnabled}
-                    onCameraToggle={setCameraEnabled}
-                    tabSwitchCount={tabSwitchCount}
-                    tabSwitchWarning={tabSwitchWarning}
-                    securityEventCount={securityEventCount}
-                    isRecruiterView={isRecruiterView}
-                    sessionStatus={data?.session.status}
-                  />
-                </div>
+      ) : (
+        <div className="relative">
+          {/* Main 2-Column Layout for Desktop - Enhanced Spacing */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-10 max-w-7xl mx-auto">
+            {/* Left Column: AI Interviewer + Question */}
+            <div className="space-y-6">
+              {/* AI Interviewer Panel */}
+              <Card variant="elevated">
+                <InterviewerPanel
+                  question={currentQuestionText}
+                  isTyping={showTyping}
+                  readAloud={readAloud}
+                  onReadAloudChange={setReadAloud}
+                  showVideoPlaceholder={true}
+                />
               </Card>
 
-              {/* Latest Evaluation - Expanded to match right column height */}
-              {lastEval?.evaluation && !completed && (
-                <Card variant="outlined" className="shadow-sm flex-1 flex flex-col min-h-0">
-                  <h4 className="text-sm font-semibold text-[var(--text)] mb-3">Latest evaluation</h4>
-                  <div className="flex items-center gap-4 mb-3">
-                    <div>
-                      <p className="text-xs text-[var(--muted)] mb-1">Overall</p>
-                      <p className="text-xl font-bold text-[var(--primary)]">
-                        {lastEval.evaluation.overall}/10
-                      </p>
-                    </div>
-                    <div className="flex gap-4 flex-1">
-                      <div>
-                        <p className="text-xs text-[var(--muted)] mb-1">Technical</p>
-                        <p className="text-sm font-semibold text-[var(--text)]">{lastEval.evaluation.scores.technical}</p>
-                      </div>
-                      <div>
-                        <p className="text-xs text-[var(--muted)] mb-1">Communication</p>
-                        <p className="text-sm font-semibold text-[var(--text)]">
-                          {lastEval.evaluation.scores.communication}
-                        </p>
-                      </div>
-                      <div>
-                        <p className="text-xs text-[var(--muted)] mb-1">Problem Solving</p>
-                        <p className="text-sm font-semibold text-[var(--text)]">
-                          {lastEval.evaluation.scores.problemSolving}
-                        </p>
-                      </div>
-                    </div>
-                  </div>
-                  <div className="grid grid-cols-2 gap-4 flex-1">
-                    {lastEval.evaluation.strengths && lastEval.evaluation.strengths.length > 0 && (
-                      <div className="flex flex-col">
-                        <p className="text-xs font-medium text-[var(--text)] mb-2">Strengths</p>
-                        <ul className="space-y-2 flex-1">
-                          {lastEval.evaluation.strengths.map((s, i) => (
-                            <li key={i} className="flex items-start text-xs text-[var(--muted)]">
-                              <CheckCircle2 className="w-3.5 h-3.5 text-green-600 mr-2 mt-0.5 flex-shrink-0" />
-                              <span>{s}</span>
-                            </li>
-                          ))}
-                        </ul>
-                      </div>
-                    )}
-                    {lastEval.evaluation.gaps && lastEval.evaluation.gaps.length > 0 && (
-                      <div className="flex flex-col">
-                        <p className="text-xs font-medium text-[var(--text)] mb-2">Areas to improve</p>
-                        <ul className="space-y-2 flex-1">
-                          {lastEval.evaluation.gaps.map((g, i) => (
-                            <li key={i} className="flex items-start text-xs text-[var(--muted)]">
-                              <ArrowRightIcon className="w-3.5 h-3.5 text-yellow-600 mr-2 mt-0.5 flex-shrink-0" />
-                              <span>{g}</span>
-                            </li>
-                          ))}
-                        </ul>
-                      </div>
-                    )}
-                  </div>
-                  {lastEval.evaluation.followUpQuestion && (
-                    <div className="mt-4 pt-4 border-t border-[var(--border)] rounded-lg bg-slate-50 p-3">
-                      <p className="text-xs font-medium text-[var(--text)] mb-1">Suggested follow-up</p>
-                      <p className="text-xs text-[var(--muted)]">{lastEval.evaluation.followUpQuestion}</p>
-                    </div>
-                  )}
-                </Card>
-              )}
-            </div>
-
-            {/* Right Column: Question + Answer Area */}
-            <div className="space-y-6 flex flex-col">
-              {/* Question Card - Only show if we have a question */}
+              {/* Question Card - Modern Design */}
+              {/* Question Card - Modern Design */}
               {!completed && data?.currentQuestion && (
-                <Card variant="elevated" className="transition-all duration-300">
-                  <div className="mb-4">
-                    <div className="flex items-center justify-between mb-3">
-                      <div className="flex items-center gap-3">
-                        <Badge variant="info" className="app-badge">
+                <Card variant="elevated" className="transition-all duration-300 shadow-lg border-0 bg-[var(--card)] backdrop-blur-md">
+                  <div className="mb-6">
+                    <div className="flex items-center justify-between mb-4">
+                      <div className="flex items-center gap-2.5 flex-wrap">
+                        <Badge variant="info" className="app-badge px-3 py-1.5 text-xs font-semibold shadow-sm">
                           Question {currentQuestionNum} of {data.session.totalQuestions}
                         </Badge>
-                        <Badge className="app-badge">{data.currentQuestion.category}</Badge>
-                        <Badge variant="default" className="app-badge">{data.currentQuestion.difficulty}</Badge>
+                        <Badge className="app-badge px-3 py-1.5 text-xs font-semibold shadow-sm bg-[var(--bg-secondary)] text-[var(--muted)] border-[var(--border)]">
+                          {data.currentQuestion.category}
+                        </Badge>
+                        <Badge variant="default" className="app-badge px-3 py-1.5 text-xs font-semibold shadow-sm">
+                          {data.currentQuestion.difficulty}
+                        </Badge>
                       </div>
-                      <div className="flex gap-2 items-center">
+                      <div className="flex gap-2">
                         {data.session.currentQuestionIndex > 0 && (
                           <button
                             onClick={previousQuestion}
                             disabled={loading}
-                            className="app-btn-secondary px-3 py-1.5 text-sm disabled:opacity-60"
+                            className="app-btn-secondary px-4 py-2 text-sm"
                           >
-                            <ArrowLeft className="w-4 h-4 inline mr-1" /> Previous
-                          </button>
-                        )}
-                        {/* Read Aloud Button */}
-                        {data.currentQuestion && (
-                          <button
-                            onClick={() => {
-                              if (isSpeaking) {
-                                window.speechSynthesis.cancel();
-                                setIsSpeaking(false);
-                              } else if (data.currentQuestion) {
-                                const utterance = new SpeechSynthesisUtterance(data.currentQuestion.text);
-                                utterance.rate = 0.9;
-                                utterance.pitch = 1;
-                                utterance.volume = 0.8;
-                                utterance.onstart = () => setIsSpeaking(true);
-                                utterance.onend = () => setIsSpeaking(false);
-                                utterance.onerror = () => setIsSpeaking(false);
-                                window.speechSynthesis.speak(utterance);
-                              }
-                            }}
-                            disabled={loading}
-                            className={`app-btn-secondary px-3 py-1.5 text-sm disabled:opacity-60 flex items-center gap-1.5 ${
-                              isSpeaking ? "bg-blue-100 text-blue-700" : ""
-                            }`}
-                            title={isSpeaking ? "Stop reading" : "Read question aloud"}
-                          >
-                            {isSpeaking ? (
-                              <>
-                                <VolumeX className="w-4 h-4" />
-                                Stop
-                              </>
-                            ) : (
-                              <>
-                                <Volume2 className="w-4 h-4" />
-                                Read
-                              </>
-                            )}
+                            <ArrowLeft className="w-4 h-4 inline mr-1.5" /> Previous
                           </button>
                         )}
                         {data.session.currentQuestionIndex < data.session.totalQuestions - 1 && (
                           <button
                             onClick={nextQuestion}
                             disabled={loading}
-                            className="app-btn-secondary px-3 py-1.5 text-sm disabled:opacity-60"
+                            className="app-btn-secondary px-4 py-2 text-sm"
                           >
-                            Next <ArrowRight className="w-4 h-4 inline ml-1" />
+                            Next <ArrowRight className="w-4 h-4 inline ml-1.5" />
                           </button>
                         )}
                       </div>
                     </div>
                   </div>
 
-                  {/* Question Text */}
-                  <div className="mb-4 p-6 bg-[var(--card)] rounded-lg border border-[var(--border)] shadow-sm">
-                    <p className="text-lg text-[var(--text)] leading-relaxed font-medium">
+                  {/* Question Text - Enhanced */}
+                  <div className="mb-5 p-6 bg-gradient-to-br from-indigo-900/20 via-purple-900/20 to-pink-900/20 rounded-2xl border border-[var(--primary)]/20 shadow-inner">
+                    <p className="text-lg text-[var(--text)] leading-relaxed font-semibold tracking-tight">
                       {data.currentQuestion.text}
                     </p>
                   </div>
 
-                  {/* Progress Bar */}
-                  <div className="mt-4 pt-4 border-t border-[var(--border)]">
-                    <div className="flex items-center justify-between mb-2">
-                      <span className="text-xs font-medium text-[var(--muted)]">
-                        Interview Progress
-                      </span>
-                      <span className="text-xs font-semibold text-[var(--text)]">
-                        {currentQuestionNum} of {data.session.totalQuestions}
+                  {/* Coaching Hint - Modern */}
+                  <div className="rounded-xl bg-[var(--warning-bg)] border border-[var(--warning)]/30 p-4 shadow-sm">
+                    <div className="flex items-start gap-3">
+                      <div className="w-8 h-8 rounded-lg bg-[var(--warning)]/20 flex items-center justify-center flex-shrink-0">
+                        <Lightbulb className="w-4 h-4 text-[var(--warning)]" />
+                      </div>
+                      <div>
+                        <p className="text-sm font-semibold text-[var(--warning)] mb-1">Coaching Tip</p>
+                        <p className="text-sm text-[var(--text)]/80 leading-relaxed">
+                          {getCoachingHint(data.currentQuestion.category)}
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                </Card>
+              )}
+            </div>
+
+            {/* Right Column: Answer Area */}
+            <div className="space-y-6">
+              {/* Visual Question Timeline - Modern */}
+              {!completed && data?.questions && data.questions.length > 0 && (
+                <Card className="shadow-lg border-0 overflow-hidden bg-[var(--card)]">
+                  <div className="p-6 bg-[var(--bg-secondary)]/30">
+                    <div className="flex items-center justify-between mb-5">
+                      <h4 className="text-base font-bold text-[var(--text)]">Interview Progress</h4>
+                      <span className="text-sm font-semibold text-[var(--muted)] bg-[var(--bg-secondary)] px-3 py-1 rounded-lg shadow-sm border border-[var(--border)]">
+                        {data.questions.filter(q => q.answered).length} / {data.questions.length}
                       </span>
                     </div>
-                    <div className="w-full bg-[var(--border)] rounded-full h-2 overflow-hidden">
-                      <div
-                        className="bg-[var(--primary)] h-2 rounded-full transition-all duration-500 ease-out"
-                        style={{ width: `${Math.round((currentQuestionNum / data.session.totalQuestions) * 100)}%` }}
-                      />
+                    <div className="flex items-center gap-2 overflow-x-auto pb-3 scrollbar-hide">
+                      {data.questions.map((q, idx) => {
+                        const isCurrent = idx === data.session.currentQuestionIndex;
+                        const isAnswered = q.answered;
+                        const isReached = idx <= data.session.currentQuestionIndex;
+                        const isLocked = idx > data.session.currentQuestionIndex;
+
+                        return (
+                          <div key={q.id} className="flex items-center gap-2 flex-shrink-0">
+                            {/* Question Circle - Enhanced */}
+                            <div className="relative">
+                              <div
+                                className={`w-12 h-12 rounded-xl flex items-center justify-center text-sm font-bold transition-all duration-300 shadow-lg ${isCurrent
+                                  ? "bg-[var(--primary)] text-white ring-4 ring-[var(--primary-glow)] scale-110 shadow-[var(--primary-glow)]"
+                                  : isAnswered
+                                    ? "bg-[var(--success)] text-white shadow-[var(--success-bg)]"
+                                    : isLocked
+                                      ? "bg-[var(--bg-secondary)] text-[var(--muted)] border-2 border-dashed border-[var(--border)] shadow-none"
+                                      : "bg-[var(--bg-secondary)] text-[var(--text-secondary)] shadow-sm"
+                                  }`}
+                              >
+                                {isLocked ? (
+                                  <Lock className="w-4 h-4" />
+                                ) : isAnswered ? (
+                                  <Check className="w-5 h-5" />
+                                ) : (
+                                  <span>{idx + 1}</span>
+                                )}
+                              </div>
+                              {/* Pulse animation for current question */}
+                              {isCurrent && (
+                                <div className="absolute inset-0 rounded-xl bg-indigo-600 animate-ping opacity-30" />
+                              )}
+                            </div>
+
+                            {/* Connector Line - Enhanced */}
+                            {data.questions && idx < data.questions.length - 1 && (
+                              <div
+                                className={`h-1.5 w-10 rounded-full transition-all duration-300 ${isAnswered
+                                  ? "bg-gradient-to-r from-emerald-500 to-green-500 shadow-sm"
+                                  : isReached
+                                    ? "bg-gradient-to-r from-indigo-500 to-purple-500 shadow-sm"
+                                    : "bg-slate-200"
+                                  }`}
+                              />
+                            )}
+                          </div>
+                        );
+                      })}
                     </div>
-                    <div className="mt-2 flex items-center justify-between text-xs text-[var(--muted)]">
-                      <span>{Math.round((currentQuestionNum / data.session.totalQuestions) * 100)}% Complete</span>
-                      <span>{data.session.totalQuestions - currentQuestionNum} remaining</span>
+
+                    {/* Status Legend - Modern */}
+                    <div className="mt-5 pt-4 border-t border-slate-200 flex items-center justify-between text-xs">
+                      <div className="flex items-center gap-5">
+                        <div className="flex items-center gap-2">
+                          <div className="w-3.5 h-3.5 rounded-lg bg-gradient-to-br from-emerald-500 to-green-500 shadow-sm" />
+                          <span className="text-slate-700 font-medium">Completed</span>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <div className="w-3.5 h-3.5 rounded-lg bg-gradient-to-br from-indigo-600 to-purple-600 ring-2 ring-indigo-200 shadow-sm" />
+                          <span className="text-slate-700 font-medium">Current</span>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <div className="w-3.5 h-3.5 rounded-lg bg-slate-100 border-2 border-dashed border-slate-300" />
+                          <span className="text-slate-700 font-medium">Locked</span>
+                        </div>
+                      </div>
                     </div>
                   </div>
                 </Card>
               )}
 
 
-              {/* Answer Input Card */}
+              {/* Answer Input Card - Modern */}
               {!completed && data?.currentQuestion && (
-                <Card variant="elevated" className="transition-all duration-300 flex-1 flex flex-col min-h-0">
-                  {/* Submit Button - At Top */}
-                  <div className="mb-4 flex items-center gap-3 flex-shrink-0">
-                    <button
-                      onClick={handleSubmitClick}
-                      disabled={isSubmitting || loading || completed || !answerText.trim()}
-                      className="app-btn-primary px-6 py-3 disabled:opacity-60 disabled:cursor-not-allowed flex-1"
-                    >
-                      {isSubmitting || loading ? "Submitting..." : "Submit Answer"}
-                    </button>
-                    {loading && <Skeleton className="h-10 w-24" />}
-                  </div>
-                  <p className="mb-4 text-xs text-center text-[var(--muted)] flex-shrink-0">
-                    Press Ctrl+Enter to submit
-                  </p>
-
-                  <div className="mb-4 flex-shrink-0">
-                    <h3 className="text-lg font-semibold text-[var(--text)] mb-1">
-                      Your Response
-                    </h3>
-                    {fullScreenMode && (
-                      <p className="text-xs text-[var(--muted)] mt-1">Full screen mode active</p>
+                <Card variant="elevated" className="transition-all duration-300 shadow-lg border-0">
+                  <div className="mb-6">
+                    <div className="flex items-center justify-between mb-3">
+                      <div>
+                        <h3 className="text-xl font-bold text-slate-900 mb-1">
+                          Your Response
+                        </h3>
+                        <p className="text-sm text-slate-600">Share your thoughts and experience</p>
+                      </div>
+                      {!isRecruiterView && (
+                        <div className="flex items-center gap-2.5 px-4 py-2 bg-gradient-to-r from-indigo-50 to-purple-50 border border-indigo-200/60 rounded-xl shadow-sm">
+                          <Lightbulb className="w-4 h-4 text-indigo-600" />
+                          <span className="text-xs font-semibold text-indigo-900 max-w-[200px] truncate">
+                            {getCoachingHint(data.currentQuestion.category)}
+                          </span>
+                        </div>
+                      )}
+                    </div>
+                    {focusMode && (
+                      <div className="mt-2 px-3 py-1.5 bg-amber-50 border border-amber-200 rounded-lg">
+                        <p className="text-xs font-medium text-amber-800">🔒 Focus mode active - Paste disabled</p>
+                      </div>
                     )}
                   </div>
 
                   {/* Voice Answer Recorder */}
-                  <div className="mb-4 flex-shrink-0">
+                  <div className="mb-4">
                     <VoiceAnswerRecorder
                       key={data.currentQuestion.id}
                       onTranscript={(text) => setAnswerText(text)}
@@ -1452,33 +1212,195 @@ export default function InterviewClient({ sessionId }: { sessionId: string }) {
                     />
                   </div>
 
-                  {/* Text Answer Input - Expands to fill space */}
-                  <div className="flex-1 flex flex-col min-h-0">
+                  {/* Text Answer Input - Modern */}
+                  <div>
                     <textarea
-                      className="w-full h-full rounded-lg border-2 border-[var(--border)] p-5 text-sm text-[var(--text)] bg-[var(--bg)] focus:ring-2 focus:ring-[var(--primary)]/20 focus:border-[var(--primary)] disabled:bg-slate-50 disabled:cursor-not-allowed resize-none transition-all"
+                      className="w-full rounded-xl border-2 border-slate-200 p-5 text-base text-slate-900 placeholder:text-slate-400 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 disabled:bg-slate-50 disabled:cursor-not-allowed min-h-[240px] transition-all duration-200 shadow-sm focus:shadow-md resize-none"
+                      rows={10}
                       value={answerText}
                       onChange={(e) => setAnswerText(e.target.value)}
                       onPaste={(e) => {
-                        // Allow paste in full screen mode
+                        addToast("Paste detected. Security incident logged.", "warning");
+                        if (focusMode) {
+                          e.preventDefault();
+                        }
                       }}
-                      style={{ userSelect: 'text' }} // Allow text selection in textarea
-                      placeholder="Share your thoughts, approach, and examples here. You can also use voice recording above to transcribe your response."
+                      placeholder="Type your response here or use voice recording above..."
                       disabled={loading || completed}
                     />
-                    <div className="mt-3 flex items-center justify-between flex-shrink-0">
-                      <p className="text-xs text-[var(--muted)]">
-                        {answerText.length > 0 ? `${answerText.length} characters` : "Start typing or use voice recording"}
-                      </p>
-                      <p className="text-xs text-[var(--muted)] italic">
-                        Responses may be included in your interview report
-                      </p>
+                    <div className="mt-3 flex items-center justify-between">
+                      <div className="flex items-center gap-4">
+                        <p className="text-xs font-medium text-slate-600">
+                          <span className="font-semibold text-slate-900">{answerText.length}</span> characters
+                        </p>
+                        <p className="text-xs text-slate-500">
+                          Your responses may be quoted in the interview report
+                        </p>
+                      </div>
+                      {answerText.length < 50 && answerText.length > 0 && (
+                        <div className="flex items-center gap-1.5 px-3 py-1.5 bg-amber-50 border border-amber-200 rounded-lg">
+                          <Info className="w-3.5 h-3.5 text-amber-600" />
+                          <span className="text-xs font-medium text-amber-800">Consider expanding your answer</span>
+                        </div>
+                      )}
                     </div>
                   </div>
+
+                  {/* Answer Quality Tips - Modern */}
+                  {answerText.length > 0 && data?.currentQuestion && !isRecruiterView && (
+                    <div className="mt-5 p-4 bg-gradient-to-r from-indigo-50 to-purple-50 border border-indigo-200/60 rounded-xl shadow-sm">
+                      <div className="flex items-start gap-3">
+                        <div className="w-8 h-8 rounded-lg bg-indigo-100 flex items-center justify-center flex-shrink-0">
+                          <Lightbulb className="w-4 h-4 text-indigo-600" />
+                        </div>
+                        <div className="flex-1">
+                          <p className="text-sm font-semibold text-indigo-900 mb-2">Tips for a strong answer:</p>
+                          <ul className="text-sm text-indigo-800 space-y-1.5">
+                            {data.currentQuestion.category === "technical" && (
+                              <>
+                                <li className="flex items-start gap-2"><span className="text-indigo-600 font-bold">•</span> <span>Explain your approach step-by-step</span></li>
+                                <li className="flex items-start gap-2"><span className="text-indigo-600 font-bold">•</span> <span>Discuss trade-offs and alternatives</span></li>
+                                <li className="flex items-start gap-2"><span className="text-indigo-600 font-bold">•</span> <span>Include code examples if relevant</span></li>
+                              </>
+                            )}
+                            {(data.currentQuestion.category === "behavioral" || data.currentQuestion.category === "scenario") && (
+                              <>
+                                <li className="flex items-start gap-2"><span className="text-indigo-600 font-bold">•</span> <span>Use STAR method: Situation, Task, Action, Result</span></li>
+                                <li className="flex items-start gap-2"><span className="text-indigo-600 font-bold">•</span> <span>Be specific with numbers and outcomes</span></li>
+                                <li className="flex items-start gap-2"><span className="text-indigo-600 font-bold">•</span> <span>Show what you learned</span></li>
+                              </>
+                            )}
+                            {data.currentQuestion.category === "experience" && (
+                              <>
+                                <li className="flex items-start gap-2"><span className="text-indigo-600 font-bold">•</span> <span>Provide concrete examples from your work</span></li>
+                                <li className="flex items-start gap-2"><span className="text-indigo-600 font-bold">•</span> <span>Explain challenges and how you overcame them</span></li>
+                                <li className="flex items-start gap-2"><span className="text-indigo-600 font-bold">•</span> <span>Connect to the role requirements</span></li>
+                              </>
+                            )}
+                            {!["technical", "behavioral", "scenario", "experience"].includes(data.currentQuestion.category) && (
+                              <>
+                                <li className="flex items-start gap-2"><span className="text-indigo-600 font-bold">•</span> <span>Be clear and structured</span></li>
+                                <li className="flex items-start gap-2"><span className="text-indigo-600 font-bold">•</span> <span>Provide specific examples</span></li>
+                                <li className="flex items-start gap-2"><span className="text-indigo-600 font-bold">•</span> <span>Show your thought process</span></li>
+                              </>
+                            )}
+                          </ul>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Show Feedback After Submission */}
+                  {lastEval?.ok && lastEval.evaluation && !completed && !isRecruiterView && (
+                    <div className="mt-4">
+                      <AnswerFeedback
+                        evaluation={lastEval.evaluation}
+                        questionCategory={data?.currentQuestion?.category || "general"}
+                      />
+                    </div>
+                  )}
+
+                  {/* Submit Button - Modern */}
+                  <div className="mt-6 flex items-center gap-3">
+                    <button
+                      onClick={handleSubmitClick}
+                      disabled={loading || completed || !answerText.trim()}
+                      className="flex-1 px-6 py-3.5 bg-gradient-to-r from-indigo-600 to-purple-600 text-white font-semibold rounded-xl shadow-lg hover:shadow-xl hover:from-indigo-700 hover:to-purple-700 transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:shadow-lg flex items-center justify-center gap-2"
+                    >
+                      {loading ? (
+                        <>
+                          <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                          <span>Submitting...</span>
+                        </>
+                      ) : (
+                        <>
+                          <CheckCircle2 className="w-5 h-5" />
+                          <span>Submit Answer</span>
+                        </>
+                      )}
+                    </button>
+                  </div>
+                  <p className="mt-3 text-xs text-center text-slate-500 font-medium">
+                    Press <kbd className="px-2 py-0.5 bg-slate-100 border border-slate-300 rounded text-xs font-mono">Ctrl</kbd> + <kbd className="px-2 py-0.5 bg-slate-100 border border-slate-300 rounded text-xs font-mono">Enter</kbd> to submit
+                  </p>
                 </Card>
               )}
 
-              {/* Interview Report - Only show if report not generated yet */}
-              {completed && !report && (
+              {/* Latest Evaluation - Enhanced with AnswerFeedback component */}
+              {lastEval?.evaluation && !completed && !isRecruiterView && (
+                <AnswerFeedback
+                  evaluation={lastEval.evaluation}
+                  questionCategory={data?.currentQuestion?.category || "general"}
+                />
+              )}
+
+              {/* Legacy evaluation display for recruiter view */}
+              {lastEval?.evaluation && !completed && isRecruiterView && (
+                <Card variant="outlined" className="shadow-sm">
+                  <h4 className="text-sm font-semibold text-[var(--text)] mb-3">Latest evaluation</h4>
+                  <div className="flex gap-4 mb-4">
+                    <div>
+                      <p className="text-xs text-[var(--muted)]">Overall</p>
+                      <p className="text-xl font-bold text-[var(--text)]">
+                        {lastEval.evaluation.overall}/10
+                      </p>
+                    </div>
+                    <div className="flex gap-3">
+                      <div>
+                        <p className="text-xs text-[var(--muted)]">Technical</p>
+                        <p className="text-sm font-semibold text-[var(--text)]">{lastEval.evaluation.scores.technical}</p>
+                      </div>
+                      <div>
+                        <p className="text-xs text-[var(--muted)]">Communication</p>
+                        <p className="text-sm font-semibold text-[var(--text)]">
+                          {lastEval.evaluation.scores.communication}
+                        </p>
+                      </div>
+                      <div>
+                        <p className="text-xs text-[var(--muted)]">Problem solving</p>
+                        <p className="text-sm font-semibold text-[var(--text)]">
+                          {lastEval.evaluation.scores.problemSolving}
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="grid md:grid-cols-2 gap-4">
+                    <div>
+                      <p className="text-xs font-medium text-[var(--text)] mb-2">Strengths</p>
+                      <ul className="text-xs text-[var(--muted)] space-y-1">
+                        {lastEval.evaluation.strengths.map((s, i) => (
+                          <li key={i} className="flex items-start">
+                            <CheckCircle2 className="w-3 h-3 text-green-600 mr-2 inline" />
+                            {s}
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                    <div>
+                      <p className="text-xs font-medium text-[var(--text)] mb-2">Areas to improve</p>
+                      <ul className="text-xs text-[var(--muted)] space-y-1">
+                        {lastEval.evaluation.gaps.map((g, i) => (
+                          <li key={i} className="flex items-start">
+                            <ArrowRightIcon className="w-3 h-3 text-yellow-600 mr-2 inline" />
+                            {g}
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  </div>
+
+                  {lastEval.evaluation.followUpQuestion && (
+                    <div className="mt-4 rounded-lg bg-slate-50 p-3">
+                      <p className="text-xs font-medium text-[var(--text)] mb-1">Suggested follow-up</p>
+                      <p className="text-xs text-[var(--muted)]">{lastEval.evaluation.followUpQuestion}</p>
+                    </div>
+                  )}
+                </Card>
+              )}
+
+              {/* Interview Report */}
+              {completed && (
                 <Card variant="elevated" className="shadow-sm">
                   <div className="flex items-center justify-between mb-6">
                     <div>
@@ -1497,13 +1419,15 @@ export default function InterviewClient({ sessionId }: { sessionId: string }) {
                           <Skeleton className="h-4 w-4" variant="circular" />
                           Generating...
                         </span>
+                      ) : report ? (
+                        "Regenerate report"
                       ) : (
                         "Generate report"
                       )}
                     </button>
                   </div>
 
-                  {reportLoading && (
+                  {reportLoading && !report && (
                     <div className="space-y-4">
                       <Skeleton className="h-24" variant="rectangular" />
                       <Skeleton className="h-32" variant="rectangular" />
@@ -1516,12 +1440,81 @@ export default function InterviewClient({ sessionId }: { sessionId: string }) {
                       <p className="text-sm text-red-800 font-medium">{reportError}</p>
                     </div>
                   )}
+
+                  {report && (
+                    <div className="space-y-6">
+                      {/* Share Link Section */}
+                      {shareToken && (
+                        <Card variant="outlined" className="shadow-sm">
+                          <div className="flex items-center justify-between gap-4">
+                            <div className="flex-1 min-w-0">
+                              <p className="text-xs text-[var(--muted)] mb-1">Shareable report link</p>
+                              <p className="text-xs font-mono text-[var(--text)] truncate" id="share-url">
+                                /share/{shareToken}
+                              </p>
+                            </div>
+                            <button
+                              onClick={copyShareLink}
+                              className="app-btn-secondary flex-shrink-0 px-4 py-2 text-sm"
+                            >
+                              {copySuccess ? "Copied" : "Copy link"}
+                            </button>
+                          </div>
+                        </Card>
+                      )}
+                    </div>
+                  )}
                 </Card>
               )}
             </div>
           </div>
         </div>
-      ) : null}
+      )}
+
+      {/* Report Generation Loading State */}
+      {completed && !report && (
+        <Card className="shadow-lg border-0 bg-[var(--card)]">
+          <div className="p-12 text-center">
+            <div className="w-24 h-24 mx-auto mb-8 rounded-3xl bg-gradient-to-br from-emerald-500 to-green-600 flex items-center justify-center">
+              <CheckCircle2 className="w-12 h-12 text-white animate-pulse" />
+            </div>
+            <h2 className="text-3xl font-bold text-[var(--text)] mb-3">Interview Complete!</h2>
+            <p className="text-lg text-[var(--muted)] mb-8">Great job completing all questions</p>
+
+            <div className="max-w-md mx-auto space-y-4">
+              <div className="flex items-center gap-4 p-4 bg-[var(--bg-secondary)] rounded-xl">
+                <div className="w-10 h-10 border-4 border-indigo-600 border-t-transparent rounded-full animate-spin flex-shrink-0" />
+                <div className="text-left">
+                  <p className="text-sm font-bold text-[var(--text)]">Analyzing your responses...</p>
+                  <p className="text-xs text-[var(--muted)]">Evaluating technical skills and communication</p>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-4 p-4 bg-[var(--bg-secondary)]/50 rounded-xl opacity-70">
+                <div className="w-10 h-10 bg-[var(--bg-secondary)] rounded-full flex items-center justify-center flex-shrink-0">
+                  <div className="w-5 h-5 border-2 border-[var(--muted)] rounded-full" />
+                </div>
+                <div className="text-left">
+                  <p className="text-sm font-bold text-[var(--text)]">Processing evaluation scores...</p>
+                  <p className="text-xs text-[var(--muted)]">Calculating overall performance</p>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-4 p-4 bg-[var(--bg-secondary)]/30 rounded-xl opacity-50">
+                <div className="w-10 h-10 bg-[var(--bg-secondary)] rounded-full flex items-center justify-center flex-shrink-0">
+                  <div className="w-5 h-5 border-2 border-[var(--muted)] rounded-full" />
+                </div>
+                <div className="text-left">
+                  <p className="text-sm font-bold text-[var(--text)]">Generating your report...</p>
+                  <p className="text-xs text-[var(--muted)]">Preparing detailed insights and recommendations</p>
+                </div>
+              </div>
+            </div>
+
+            <p className="mt-8 text-sm text-[var(--muted)]">This usually takes 10-15 seconds</p>
+          </div>
+        </Card>
+      )}
 
       {/* Report View - Full Width */}
       {completed && report && (

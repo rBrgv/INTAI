@@ -7,12 +7,15 @@ export type InterviewQuestion = {
   text: string;
   category: "experience" | "technical" | "scenario" | "behavioral";
   difficulty: "easy" | "medium" | "hard";
+  displayedAt?: number; // When question was first displayed to candidate
 };
 
 export type InterviewAnswer = {
   questionId: string;
   text: string;
   submittedAt: number;
+  timeSpent?: number; // Time in seconds from question display to answer submission
+  isSuspiciouslyFast?: boolean; // Flagged if answered too quickly (< 10s for hard, < 5s for easy/medium)
 };
 
 export type InterviewEvaluation = {
@@ -56,12 +59,6 @@ export type InterviewReport = {
     evidenceType: "technical" | "leadership" | "communication" | "problem_solving";
   }>;
   nextRoundFocus: string[]; // 4-6 bullets
-  securitySummary?: {
-    tabSwitchCount: number;
-    securityEventCount: number;
-    criticalEvents: string[];
-    summary: string; // AI-generated summary of security concerns
-  };
 };
 
 // New: Interview configuration
@@ -94,6 +91,7 @@ export type CollegeJobTemplate = {
 export type CandidateBatch = {
   id: string;
   jobTemplateId: string;
+  collegeId?: string;
   candidates: Array<{
     email: string;
     name: string;
@@ -136,10 +134,13 @@ export type InterviewSession = {
   studentId?: string;
   tabSwitchCount?: number; // For cheating detection
   tabSwitchEvents?: Array<{ timestamp: number; type: "blur" | "focus" }>;
-  securityEvents?: Array<{ 
-    event: string; 
-    timestamp: number; 
-    details?: Record<string, any> 
-  }>;
+  lastActivityAt?: number; // Last activity timestamp for session timeout
+  startedAt?: number; // When interview was actually started (questions generated)
+  questionTimings?: Array<{
+    questionId: string;
+    displayedAt: number;
+    answeredAt?: number;
+    timeSpent?: number;
+  }>; // Detailed timing per question
 };
 

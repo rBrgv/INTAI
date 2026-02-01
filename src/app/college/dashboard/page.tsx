@@ -1,159 +1,177 @@
 "use client";
 
-import { useState, useEffect, Suspense } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { ArrowLeft, Calendar, Users, CheckCircle2, Clock, FileText, TrendingUp, ExternalLink } from "lucide-react";
+import { ArrowLeft, Plus, ExternalLink, Users, FileText, LogOut, User, Copy, CheckCircle2, Clock, Edit, Trash2, Send, ChevronDown, ChevronUp } from "lucide-react";
 import Card from "@/components/Card";
 import Container from "@/components/Container";
-import { clientLogger } from "@/lib/clientLogger";
+import Badge from "@/components/Badge";
+import Skeleton from "@/components/Skeleton";
+import QuickStats from "@/components/QuickStats";
 
-type Batch = {
+type Template = {
   id: string;
-  jobTemplateId: string;
+  jdText: string;
+  topSkills: string[];
+  config: {
+    questionCount: number;
+    difficultyCurve: string;
+  };
   createdAt: number;
-  candidates: Array<{
-    email: string;
-    name: string;
-    studentId?: string;
-    sessionId?: string;
-    status?: "pending" | "in_progress" | "completed";
-    score?: number;
-    completedAt?: number;
-    hasReport?: boolean;
-    shareToken?: string;
-  }>;
 };
 
-type BatchStats = {
-  total: number;
-  pending: number;
-  inProgress: number;
-  completed: number;
-  averageScore: number;
+type Session = {
+  collegeId: string;
+  collegeName: string;
+  userEmail: string;
+  userId: string;
+  role: 'admin' | 'viewer';
 };
 
-function CollegeDashboardContent() {
+export default function CollegeDashboardPage() {
   const router = useRouter();
-  const searchParams = useSearchParams();
-  const batchIdParam = searchParams.get('batch');
-
-  const [batches, setBatches] = useState<Batch[]>([]);
-  const [selectedBatch, setSelectedBatch] = useState<Batch | null>(null);
-  const [batchStats, setBatchStats] = useState<BatchStats | null>(null);
+  const [templates, setTemplates] = useState<Template[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [session, setSession] = useState<Session | null>(null);
+  const [duplicating, setDuplicating] = useState<string | null>(null);
+  const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
+  const [stats, setStats] = useState({
+    totalCandidates: 0,
+    completedCandidates: 0,
+    inProgressCandidates: 0,
+    pendingCandidates: 0,
+  });
 
-  useEffect(() => {
-    if (batchIdParam) {
-      loadBatch(batchIdParam);
-    } else {
-      // Load all batches (for now, we'll show a message to create a batch)
-      setLoading(false);
+  // Extract job title from JD text (first line or first 60 chars)
+  const extractJobTitle = (jdText: string): string => {
+    const firstLine = jdText.split('\n')[0].trim();
+    if (firstLine.length > 0 && firstLine.length < 100) {
+      return firstLine;
     }
-  }, [batchIdParam]);
-
-  const loadBatch = async (batchId: string) => {
-    setLoading(true);
-    setError(null);
-    
-    try {
-      const res = await fetch(`/api/college/batch/${batchId}`);
-      const data = await res.json();
-
-      if (!res.ok) {
-        throw new Error(data.error || data.message || "Failed to load batch");
-      }
-
-      const batchData = data.data?.batch || data.batch;
-      const stats = data.data?.stats || data.stats;
-
-      setSelectedBatch(batchData);
-      setBatchStats(stats);
-    } catch (err) {
-      const errorMessage = err instanceof Error ? err.message : "Failed to load batch";
-      setError(errorMessage);
-      clientLogger.error("Failed to load batch", err instanceof Error ? err : new Error(String(err)), { batchId });
-    } finally {
-      setLoading(false);
-    }
+    return jdText.substring(0, 60).trim() + '...';
   };
 
-  const getStatusColor = (status?: string) => {
-    switch (status) {
-      case 'completed':
-        return 'bg-green-100 text-green-800 border-green-200';
-      case 'in_progress':
-        return 'bg-blue-100 text-blue-800 border-blue-200';
-      case 'pending':
-      case 'created':
-      default:
-        return 'bg-gray-100 text-gray-800 border-gray-200';
+  // Group templates by job title
+  const groupedTemplates = templates.reduce((acc, template) => {
+    const jobTitle = extractJobTitle(template.jdText);
+    if (!acc[jobTitle]) {
+      acc[jobTitle] = [];
+    }
+    acc[jobTitle].push(template);
+    return acc;
+  }, {} as Record<string, Template[]>);
+
+  const toggleGroup = (jobTitle: string) => {
+    const newExpanded = new Set(expandedGroups);
+    if (newExpanded.has(jobTitle)) {
+      newExpanded.delete(jobTitle);
+    } else {
+      newExpanded.add(jobTitle);
+    }
+    setExpandedGroups(newExpanded);
+  };
+
+  useEffect(() => {
+    async function checkAuth() {
+      try {
+        const res = await fetch("/api/college/auth/session");
+        const data = await res.json();
+        if (!res.ok || !data.data?.session) {
+          router.push("/college/login?redirect=/college/dashboard");
+          return;
+        }
+        setSession(data.data.session);
+      } catch (err) {
+        router.push("/college/login?redirect=/college/dashboard");
+      }
+    }
+    checkAuth();
+  }, [router]);
+
+  useEffect(() => {
+    if (!session) return;
+
+    async function fetchTemplates() {
+      try {
+        const res = await fetch("/api/college/templates");
+        const data = await res.json();
+        if (!res.ok) {
+          throw new Error(data.error || data.message || "Failed to fetch templates");
+        }
+        const templatesData = data.data?.templates || data.templates || [];
+        setTemplates(templatesData);
+
+        // Fetch stats for all templates
+        let totalCandidates = 0;
+        let completedCandidates = 0;
+        let inProgressCandidates = 0;
+        let pendingCandidates = 0;
+
+        for (const template of templatesData) {
+          try {
+            const batchesRes = await fetch(`/api/college/batch?templateId=${template.id}`);
+            const batchesData = await batchesRes.json();
+            if (batchesRes.ok) {
+              const batches = batchesData.data?.batches || batchesData.batches || [];
+              batches.forEach((batch: any) => {
+                if (batch.candidates) {
+                  batch.candidates.forEach((c: any) => {
+                    totalCandidates++;
+                    const status = c.status || "pending";
+                    if (status === "completed") completedCandidates++;
+                    else if (status === "in_progress") inProgressCandidates++;
+                    else pendingCandidates++;
+                  });
+                }
+              });
+            }
+          } catch (err) {
+            // Skip failed template stats
+          }
+        }
+
+        setStats({
+          totalCandidates,
+          completedCandidates,
+          inProgressCandidates,
+          pendingCandidates,
+        });
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Failed to load templates");
+      } finally {
+        setLoading(false);
+      }
+    }
+    fetchTemplates();
+  }, [session]);
+
+  const handleLogout = async () => {
+    try {
+      await fetch("/api/college/auth/logout", { method: "POST" });
+      router.push("/college/login");
+      router.refresh();
+    } catch (err) {
+      console.error("Logout error:", err);
     }
   };
 
   const formatDate = (timestamp: number) => {
-    return new Date(timestamp).toLocaleDateString('en-US', {
-      year: 'numeric',
-      month: 'short',
-      day: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit',
+    return new Date(timestamp).toLocaleDateString("en-US", {
+      year: "numeric",
+      month: "short",
+      day: "numeric",
     });
   };
 
-  if (loading) {
+  if (!session || loading) {
     return (
       <Container className="py-8">
-        <div className="flex items-center justify-center min-h-[400px]">
-          <div className="text-center">
-            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-[var(--primary)] mx-auto mb-4"></div>
-            <p className="text-[var(--muted)]">Loading batch...</p>
-          </div>
-        </div>
-      </Container>
-    );
-  }
-
-  if (error) {
-    return (
-      <Container className="py-8">
-        <div className="max-w-2xl mx-auto">
-          <Link href="/college" className="inline-flex items-center gap-2 text-[var(--muted)] hover:text-[var(--text)] mb-6">
-            <ArrowLeft className="w-4 h-4" />
-            Back to Setup
-          </Link>
-          <Card>
-            <div className="p-6 text-center">
-              <p className="text-[var(--danger)] mb-4">{error}</p>
-              <Link href="/college" className="app-btn-primary">
-                Create New Batch
-              </Link>
-            </div>
-          </Card>
-        </div>
-      </Container>
-    );
-  }
-
-  if (!selectedBatch) {
-    return (
-      <Container className="py-8">
-        <div className="max-w-2xl mx-auto">
-          <Link href="/college" className="inline-flex items-center gap-2 text-[var(--muted)] hover:text-[var(--text)] mb-6">
-            <ArrowLeft className="w-4 h-4" />
-            Back to Setup
-          </Link>
-          <Card>
-            <div className="p-6 text-center">
-              <p className="text-[var(--muted)] mb-4">
-                No batch selected. Create a new batch to get started.
-              </p>
-              <Link href="/college" className="app-btn-primary">
-                Create New Batch
-              </Link>
-            </div>
-          </Card>
+        <div className="space-y-4">
+          <Skeleton className="h-8 w-64" />
+          <Skeleton className="h-32" variant="rectangular" />
+          <Skeleton className="h-32" variant="rectangular" />
         </div>
       </Container>
     );
@@ -161,159 +179,329 @@ function CollegeDashboardContent() {
 
   return (
     <Container className="py-8">
-      <div className="max-w-6xl mx-auto">
-        <Link href="/college" className="inline-flex items-center gap-2 text-[var(--muted)] hover:text-[var(--text)] mb-6">
-          <ArrowLeft className="w-4 h-4" />
-          Back to Setup
-        </Link>
-
-        <div className="mb-6">
-          <h1 className="text-2xl font-bold text-[var(--text)] mb-2">Batch Dashboard</h1>
-          <p className="text-[var(--muted)]">
-            Created {formatDate(selectedBatch.createdAt)} • {selectedBatch.candidates.length} candidates
-          </p>
-        </div>
-
-        {batchStats && (
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
-            <Card className="p-4">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm text-[var(--muted)] mb-1">Total</p>
-                  <p className="text-2xl font-bold text-[var(--text)]">{batchStats.total}</p>
-                </div>
-                <Users className="w-8 h-8 text-[var(--muted)]" />
-              </div>
-            </Card>
-            <Card className="p-4">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm text-[var(--muted)] mb-1">Pending</p>
-                  <p className="text-2xl font-bold text-[var(--text)]">{batchStats.pending}</p>
-                </div>
-                <Clock className="w-8 h-8 text-[var(--muted)]" />
-              </div>
-            </Card>
-            <Card className="p-4">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm text-[var(--muted)] mb-1">In Progress</p>
-                  <p className="text-2xl font-bold text-[var(--text)]">{batchStats.inProgress}</p>
-                </div>
-                <FileText className="w-8 h-8 text-[var(--muted)]" />
-              </div>
-            </Card>
-            <Card className="p-4">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm text-[var(--muted)] mb-1">Completed</p>
-                  <p className="text-2xl font-bold text-[var(--text)]">{batchStats.completed}</p>
-                </div>
-                <CheckCircle2 className="w-8 h-8 text-green-600" />
-              </div>
-            </Card>
+      {/* Header */}
+      <div className="flex items-center justify-between mb-8">
+        <div className="flex items-center gap-4">
+          <div className="p-3 rounded-xl bg-gradient-to-br from-[var(--primary)] to-[var(--primary-hover)] shadow-lg shadow-[var(--primary-glow)]">
+            <User className="w-7 h-7 text-white" />
           </div>
-        )}
+          <div>
+            <h1 className="text-3xl font-bold bg-gradient-to-r from-[var(--text)] to-[var(--text-secondary)] bg-clip-text text-transparent">
+              College Dashboard
+            </h1>
+            <p className="text-sm text-[var(--muted)] mt-1 flex items-center gap-2">
+              <span className="inline-block w-2 h-2 bg-[var(--success)] rounded-full animate-pulse"></span>
+              {session?.collegeName || "Loading..."}
+            </p>
+          </div>
+        </div>
+        <div className="flex gap-3">
+          <Link
+            href="/college"
+            className="app-btn-primary px-5 py-2.5 flex items-center gap-2 hover:scale-105 transition-transform"
+          >
+            <Plus className="w-4 h-4" />
+            Create Template
+          </Link>
+          <Link
+            href="/college/students"
+            className="app-btn-secondary px-5 py-2.5 flex items-center gap-2 hover:scale-105 transition-transform"
+          >
+            <Users className="w-4 h-4" />
+            Manage Students
+          </Link>
+          <button
+            onClick={handleLogout}
+            className="app-btn-secondary px-4 py-2.5 hover:scale-105 transition-transform"
+            title="Logout"
+          >
+            <LogOut className="w-4 h-4" />
+          </button>
+        </div>
+      </div>
 
-        {batchStats && batchStats.completed > 0 && (
-          <Card className="p-4 mb-6">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm text-[var(--muted)] mb-1">Average Score</p>
-                <p className="text-2xl font-bold text-[var(--text)]">
-                  {batchStats.averageScore.toFixed(1)}/10
-                </p>
-              </div>
-              <TrendingUp className="w-8 h-8 text-[var(--primary)]" />
-            </div>
-          </Card>
-        )}
-
-        <Card>
-          <div className="p-6">
-            <h2 className="text-lg font-semibold text-[var(--text)] mb-4">Candidates</h2>
-            <div className="overflow-x-auto">
-              <table className="w-full">
-                <thead>
-                  <tr className="border-b border-[var(--border)]">
-                    <th className="px-4 py-3 text-left text-xs font-medium text-[var(--muted)]">Name</th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-[var(--muted)]">Email</th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-[var(--muted)]">Student ID</th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-[var(--muted)]">Status</th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-[var(--muted)]">Score</th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-[var(--muted)]">Actions</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {selectedBatch.candidates.map((candidate, index) => (
-                    <tr key={index} className="border-b border-[var(--border)] hover:bg-[var(--bg)]">
-                      <td className="px-4 py-3 text-sm text-[var(--text)]">{candidate.name}</td>
-                      <td className="px-4 py-3 text-sm text-[var(--muted)]">{candidate.email}</td>
-                      <td className="px-4 py-3 text-sm text-[var(--muted)]">{candidate.studentId || '-'}</td>
-                      <td className="px-4 py-3">
-                        <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium border ${getStatusColor(candidate.status)}`}>
-                          {candidate.status === 'completed' ? 'Completed' :
-                           candidate.status === 'in_progress' ? 'In Progress' :
-                           'Pending'}
-                        </span>
-                      </td>
-                      <td className="px-4 py-3 text-sm text-[var(--text)]">
-                        {candidate.score !== undefined ? (
-                          <span className="font-medium">{candidate.score.toFixed(1)}/10</span>
-                        ) : (
-                          <span className="text-[var(--muted)]">-</span>
-                        )}
-                      </td>
-                      <td className="px-4 py-3">
-                        <div className="flex items-center gap-2">
-                          {candidate.sessionId && (
-                            <Link
-                              href={`/interview/${candidate.sessionId}`}
-                              target="_blank"
-                              className="p-1.5 hover:bg-[var(--bg)] rounded transition-colors"
-                              title="View interview"
-                            >
-                              <ExternalLink className="w-4 h-4 text-[var(--muted)]" />
-                            </Link>
-                          )}
-                          {candidate.hasReport && candidate.shareToken && (
-                            <Link
-                              href={`/share/${candidate.shareToken}`}
-                              target="_blank"
-                              className="p-1.5 hover:bg-[var(--bg)] rounded transition-colors"
-                              title="View report"
-                            >
-                              <FileText className="w-4 h-4 text-[var(--primary)]" />
-                            </Link>
-                          )}
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+      {error && (
+        <Card className="app-card mb-6">
+          <div className="rounded-lg bg-[var(--danger-bg)] border border-[var(--danger)] p-4">
+            <p className="text-sm text-[var(--danger)]">{error}</p>
           </div>
         </Card>
-      </div>
-    </Container>
-  );
-}
+      )}
 
-export default function CollegeDashboardPage() {
-  return (
-    <Suspense fallback={
-      <Container className="py-8">
-        <div className="flex items-center justify-center min-h-[400px]">
-          <div className="text-center">
-            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-[var(--primary)] mx-auto mb-4"></div>
-            <p className="text-[var(--muted)]">Loading dashboard...</p>
+      {/* Quick Stats */}
+      {templates.length > 0 && !loading && (
+        <QuickStats
+          stats={[
+            {
+              label: "Total Templates",
+              value: templates.length,
+              icon: <FileText className="w-6 h-6" />,
+              color: "blue",
+            },
+            {
+              label: "Total Candidates",
+              value: stats.totalCandidates,
+              icon: <Users className="w-6 h-6" />,
+              color: "purple",
+            },
+            {
+              label: "Completed",
+              value: stats.completedCandidates,
+              icon: <CheckCircle2 className="w-6 h-6" />,
+              color: "green",
+              trend: stats.totalCandidates > 0
+                ? `${Math.round((stats.completedCandidates / stats.totalCandidates) * 100)}% completion rate`
+                : undefined,
+            },
+            {
+              label: "In Progress",
+              value: stats.inProgressCandidates,
+              icon: <Clock className="w-6 h-6" />,
+              color: "yellow",
+            },
+          ]}
+        />
+      )}
+
+      {templates.length === 0 ? (
+        <Card className="app-card">
+          <div className="text-center py-12">
+            <FileText className="w-12 h-12 text-[var(--muted)] mx-auto mb-4" />
+            <h3 className="text-lg font-semibold text-[var(--text)] mb-2">No templates yet</h3>
+            <p className="text-sm text-[var(--muted)] mb-6">
+              Create your first job template to start managing candidate interviews
+            </p>
+            <Link href="/college" className="app-btn-primary px-6 py-2.5 inline-flex items-center gap-2">
+              <Plus className="w-4 h-4" />
+              Create Template
+            </Link>
           </div>
+        </Card>
+      ) : (
+        <div className="grid md:grid-cols-1 lg:grid-cols-2 gap-8">
+          {Object.entries(groupedTemplates).map(([jobTitle, groupTemplates]) => {
+            const isExpanded = expandedGroups.has(jobTitle);
+            const primaryTemplate = groupTemplates[0];
+            const variationCount = groupTemplates.length;
+
+            return (
+              <Card key={jobTitle} className="app-card hover:shadow-2xl hover:scale-[1.02] transition-all duration-300 border border-[var(--border)] hover:border-[var(--primary)] p-6">
+                <div className="flex items-start justify-between mb-4">
+                  <div className="flex-1">
+                    <h3 className="text-lg font-bold text-[var(--text)] mb-2 line-clamp-2">
+                      {jobTitle}
+                    </h3>
+                    <div className="flex items-center gap-2">
+                      <p className="text-xs text-[var(--muted)]">
+                        Created {formatDate(primaryTemplate.createdAt)}
+                      </p>
+                      {variationCount > 1 && (
+                        <Badge variant="info" className="text-xs">
+                          {variationCount} variations
+                        </Badge>
+                      )}
+                    </div>
+                  </div>
+                </div>
+
+                <div className="space-y-3 mb-4">
+                  <div>
+                    <p className="text-xs font-medium text-[var(--muted)] mb-1">Skills</p>
+                    <div className="flex flex-wrap gap-1">
+                      {primaryTemplate.topSkills.slice(0, 3).map((skill, i) => (
+                        <Badge key={i} variant="default" className="text-xs">
+                          {skill}
+                        </Badge>
+                      ))}
+                      {primaryTemplate.topSkills.length > 3 && (
+                        <Badge variant="default" className="text-xs">
+                          +{primaryTemplate.topSkills.length - 3}
+                        </Badge>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-4 text-xs text-[var(--muted)]">
+                    <div className="flex items-center gap-1">
+                      <FileText className="w-3 h-3" />
+                      <span>{primaryTemplate.config.questionCount} questions</span>
+                    </div>
+                    <div className="flex items-center gap-1">
+                      <Users className="w-3 h-3" />
+                      <span>{primaryTemplate.config.difficultyCurve.replace("_", " ")}</span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Expandable Variations Table */}
+                {variationCount > 1 && (
+                  <div className="mb-4">
+                    <button
+                      onClick={() => toggleGroup(jobTitle)}
+                      className="w-full flex items-center justify-between text-sm text-[var(--primary)] hover:text-[var(--primary-hover)] transition-colors py-2"
+                    >
+                      <span className="font-medium">
+                        {isExpanded ? 'Hide' : 'View'} {variationCount} variations
+                      </span>
+                      {isExpanded ? (
+                        <ChevronUp className="w-4 h-4" />
+                      ) : (
+                        <ChevronDown className="w-4 h-4" />
+                      )}
+                    </button>
+
+                    {isExpanded && (
+                      <div className="mt-3 rounded-lg border border-[var(--border)] overflow-x-auto">
+                        <table className="w-full text-xs">
+                          <thead className="bg-[var(--bg)] border-b border-[var(--border)]">
+                            <tr>
+                              <th className="px-3 py-2.5 text-left text-[var(--muted)] font-medium whitespace-nowrap">Questions</th>
+                              <th className="px-3 py-2.5 text-left text-[var(--muted)] font-medium whitespace-nowrap">Difficulty</th>
+                              <th className="px-3 py-2.5 text-left text-[var(--muted)] font-medium whitespace-nowrap">Created</th>
+                              <th className="px-3 py-2.5 text-center text-[var(--muted)] font-medium whitespace-nowrap">Actions</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {groupTemplates.map((template, idx) => (
+                              <tr key={template.id} className={`border-b border-[var(--border)] hover:bg-[var(--card-hover)] transition-colors ${idx % 2 === 0 ? 'bg-[var(--card)]' : 'bg-[var(--bg)]'}`}>
+                                <td className="px-3 py-2.5 text-[var(--text)] whitespace-nowrap">{template.config.questionCount}</td>
+                                <td className="px-3 py-2.5 text-[var(--text)] whitespace-nowrap">
+                                  <Badge variant="default" className="text-xs">
+                                    {template.config.difficultyCurve.replace("_", " ")}
+                                  </Badge>
+                                </td>
+                                <td className="px-3 py-2.5 text-[var(--muted)] whitespace-nowrap text-xs">
+                                  {formatDate(template.createdAt)}
+                                </td>
+                                <td className="px-3 py-2.5">
+                                  <div className="flex gap-2 justify-center">
+                                    <Link
+                                      href={`/college/dashboard/${template.id}`}
+                                      className="p-1.5 rounded hover:bg-[var(--primary-bg)] text-[var(--primary)] hover:text-[var(--primary-hover)] transition-all"
+                                      title="View Dashboard"
+                                    >
+                                      <ExternalLink className="w-3.5 h-3.5" />
+                                    </Link>
+                                    <Link
+                                      href={`/college/templates/${template.id}/edit`}
+                                      className="p-1.5 rounded hover:bg-[var(--card-hover)] text-[var(--text-secondary)] hover:text-[var(--text)] transition-all"
+                                      title="Edit"
+                                    >
+                                      <Edit className="w-3.5 h-3.5" />
+                                    </Link>
+                                  </div>
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* Primary Actions */}
+                <div className="space-y-3">
+                  {/* Primary Action */}
+                  <Link
+                    href={`/college/dashboard/${primaryTemplate.id}`}
+                    className="app-btn-primary w-full px-4 py-2.5 text-sm flex items-center justify-center gap-2"
+                  >
+                    <ExternalLink className="w-4 h-4" />
+                    View Dashboard
+                  </Link>
+
+                  {/* Secondary Actions Grid */}
+                  <div className="grid grid-cols-4 gap-2">
+                    <Link
+                      href={`/college/dashboard/${primaryTemplate.id}?tab=send`}
+                      className="app-btn-secondary px-3 py-2.5 flex flex-col items-center justify-center gap-1 hover:scale-105 transition-transform"
+                      title="Send Links"
+                    >
+                      <Send className="w-4 h-4" />
+                      <span className="text-[10px]">Send</span>
+                    </Link>
+                    <Link
+                      href={`/college/templates/${primaryTemplate.id}/edit`}
+                      className="app-btn-secondary px-3 py-2.5 flex flex-col items-center justify-center gap-1 hover:scale-105 transition-transform"
+                      title="Edit template"
+                    >
+                      <Edit className="w-4 h-4" />
+                      <span className="text-[10px]">Edit</span>
+                    </Link>
+                    <button
+                      onClick={async () => {
+                        if (duplicating) return;
+                        setDuplicating(primaryTemplate.id);
+                        try {
+                          const res = await fetch(`/api/college/templates/${primaryTemplate.id}/duplicate`, {
+                            method: "POST",
+                          });
+                          const data = await res.json();
+                          if (res.ok) {
+                            // Refresh templates
+                            const templatesRes = await fetch("/api/college/templates");
+                            const templatesData = await templatesRes.json();
+                            if (templatesRes.ok) {
+                              const responseData = templatesData.data || templatesData;
+                              setTemplates(responseData.templates || []);
+                            }
+                          } else {
+                            setError(data.error || "Failed to duplicate template");
+                          }
+                        } catch (err) {
+                          setError(err instanceof Error ? err.message : "Failed to duplicate template");
+                        } finally {
+                          setDuplicating(null);
+                        }
+                      }}
+                      disabled={duplicating === primaryTemplate.id}
+                      className="app-btn-secondary px-3 py-2.5 flex flex-col items-center justify-center gap-1 disabled:opacity-60 hover:scale-105 transition-transform"
+                      title="Duplicate template"
+                    >
+                      <Copy className="w-4 h-4" />
+                      <span className="text-[10px]">Copy</span>
+                    </button>
+                    <button
+                      onClick={async () => {
+                        if (!confirm(`Are you sure you want to delete this template${variationCount > 1 ? ` (${variationCount} variations)` : ''}? This action cannot be undone.`)) {
+                          return;
+                        }
+                        try {
+                          // Delete all templates in the group
+                          await Promise.all(groupTemplates.map(async (template) => {
+                            const res = await fetch(`/api/college/templates/${template.id}`, {
+                              method: "DELETE",
+                            });
+                            if (!res.ok) {
+                              throw new Error("Failed to delete template");
+                            }
+                          }));
+                          // Refresh templates
+                          const templatesRes = await fetch("/api/college/templates");
+                          const templatesData = await templatesRes.json();
+                          if (templatesRes.ok) {
+                            const responseData = templatesData.data || templatesData;
+                            setTemplates(responseData.templates || []);
+                          }
+                        } catch (err) {
+                          setError(err instanceof Error ? err.message : "Failed to delete template");
+                        }
+                      }}
+                      className="app-btn-secondary px-3 py-2.5 flex flex-col items-center justify-center gap-1 text-[var(--danger)] hover:bg-[var(--danger-bg)] hover:scale-105 transition-all"
+                      title={`Delete ${variationCount > 1 ? 'all variations' : 'template'}`}
+                    >
+                      <Trash2 className="w-4 h-4" />
+                      <span className="text-[10px]">Delete</span>
+                    </button>
+                  </div>
+                </div>
+              </Card>
+            );
+          })}
         </div>
-      </Container>
-    }>
-      <CollegeDashboardContent />
-    </Suspense>
+      )}
+    </Container>
   );
 }
 

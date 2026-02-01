@@ -12,39 +12,9 @@ if (!supabaseUrl || !supabaseAnonKey) {
   }
 }
 
-// Create Supabase client with anon key (for client-side and general use)
 export const supabase = supabaseUrl && supabaseAnonKey
-  ? createClient(supabaseUrl, supabaseAnonKey, {
-      db: {
-        schema: 'public',
-      },
-    })
+  ? createClient(supabaseUrl, supabaseAnonKey)
   : null;
-
-// Create Supabase client with service role key for server-side operations
-// This bypasses RLS and read replicas, ensuring we get fresh data immediately
-// Set SUPABASE_SERVICE_ROLE_KEY in your environment variables (server-side only, never expose to client)
-const supabaseServiceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
-export const supabaseAdmin = supabaseUrl && supabaseServiceRoleKey
-  ? createClient(supabaseUrl, supabaseServiceRoleKey, {
-      db: {
-        schema: 'public',
-      },
-      auth: {
-        autoRefreshToken: false,
-        persistSession: false,
-      },
-    })
-  : null;
-
-// Helper to get the appropriate Supabase client
-// Use admin client for server-side reads to bypass read replicas
-export function getSupabaseClient(useAdmin = false) {
-  if (useAdmin && supabaseAdmin) {
-    return supabaseAdmin;
-  }
-  return supabase;
-}
 
 // Helper to check if Supabase is configured
 export function isSupabaseConfigured(): boolean {

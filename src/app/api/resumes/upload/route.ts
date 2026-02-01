@@ -1,13 +1,7 @@
-import { NextResponse } from "next/server";
 import { supabase, isSupabaseConfigured, STORAGE_BUCKETS } from "@/lib/supabase";
 import { logAudit } from "@/lib/unifiedStore";
 import { apiSuccess, apiError } from "@/lib/apiResponse";
 import { logger } from "@/lib/logger";
-
-// Configure for production
-export const dynamic = 'force-dynamic';
-export const revalidate = 0;
-export const maxDuration = 60; // File upload can take time
 
 export async function POST(req: Request) {
   // If Supabase is not configured, return a helpful error but don't block the user
@@ -79,23 +73,19 @@ export async function POST(req: Request) {
       // Check if bucket doesn't exist or permission issue - return 503 (Service Unavailable)
       const errorMessage = uploadError.message || String(uploadError);
       if (errorMessage.includes("Bucket not found") || errorMessage.includes("new row violates") || errorMessage.includes("permission") || errorMessage.includes("not found")) {
-        return NextResponse.json(
-          { 
-            error: "Storage bucket not configured. Please create a 'resumes' bucket in Supabase Storage.",
-            message: "File storage is not available. Text extraction will still work.",
-            details: errorMessage 
-          },
-          { status: 503 } // Service Unavailable
+        return apiError(
+          "Storage bucket not configured. Please create a 'resumes' bucket in Supabase Storage.",
+          "File storage is not available. Text extraction will still work.",
+          503,
+          { details: errorMessage }
         );
       }
       // For other storage errors, also return 503 since storage is optional
-      return NextResponse.json(
-        { 
-          error: "Failed to upload file to storage",
-          message: "File storage is not available. Text extraction will still work.",
-          details: errorMessage 
-        },
-        { status: 503 } // Service Unavailable
+      return apiError(
+        "Failed to upload file to storage",
+        "File storage is not available. Text extraction will still work.",
+        503,
+        { details: errorMessage }
       );
     }
 

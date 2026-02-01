@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { sanitizeForDisplay } from "@/lib/sanitize";
 import { logger } from "@/lib/logger";
 
 type VoiceAnswerRecorderProps = {
@@ -50,7 +51,7 @@ export default function VoiceAnswerRecorder({
 
       // Update interim transcript (live typing)
       setInterimTranscript(newInterim);
-      
+
       // Add finalized text to persistent transcript
       if (newFinal) {
         setTranscript((prev) => {
@@ -70,15 +71,13 @@ export default function VoiceAnswerRecorder({
 
     recognition.onend = () => {
       // Keep transcript persistent - don't clear on silence
-      // Finalize any remaining interim text using state updater function
-      setInterimTranscript((currentInterim) => {
-        if (currentInterim.trim()) {
-          setTranscript((prev) => {
-            return prev ? `${prev} ${currentInterim.trim()}`.trim() : currentInterim.trim();
-          });
-        }
-        return "";
-      });
+      // Finalize any remaining interim text
+      if (interimTranscript.trim()) {
+        setTranscript((prev) => {
+          return prev ? `${prev} ${interimTranscript.trim()}`.trim() : interimTranscript.trim();
+        });
+        setInterimTranscript("");
+      }
       setIsRecording(false);
     };
 
@@ -129,15 +128,13 @@ export default function VoiceAnswerRecorder({
     if (recognitionRef.current) {
       recognitionRef.current.stop();
       setIsRecording(false);
-      // Finalize any remaining interim text using state updater
-      setInterimTranscript((currentInterim) => {
-        if (currentInterim.trim()) {
-          setTranscript((prev) => {
-            return prev ? `${prev} ${currentInterim.trim()}`.trim() : currentInterim.trim();
-          });
-        }
-        return "";
-      });
+      // Finalize any remaining interim text
+      if (interimTranscript.trim()) {
+        setTranscript((prev) => {
+          return prev ? `${prev} ${interimTranscript.trim()}`.trim() : interimTranscript.trim();
+        });
+        setInterimTranscript("");
+      }
     }
   };
 
@@ -176,7 +173,7 @@ export default function VoiceAnswerRecorder({
 
   return (
     <div className="space-y-3">
-      <div className="rounded-lg bg-slate-50 border border-[var(--border)] p-4 shadow-sm">
+      <div className="app-card p-4 shadow-sm">
         <div className="flex items-center justify-between mb-3">
           <p className="text-sm font-medium text-[var(--text)]">Record response</p>
           {isRecording && (
@@ -191,9 +188,9 @@ export default function VoiceAnswerRecorder({
         {(transcript || interimTranscript) && (
           <div className="mb-3 rounded-md bg-white border border-slate-200 p-3 max-h-32 overflow-y-auto">
             <p className="text-sm text-slate-700 whitespace-pre-wrap">
-              {transcript}
+              {sanitizeForDisplay(transcript)}
               {interimTranscript && (
-                <span className="text-slate-500 italic">{interimTranscript}</span>
+                <span className="text-slate-500 italic">{sanitizeForDisplay(interimTranscript)}</span>
               )}
             </p>
           </div>

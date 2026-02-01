@@ -101,10 +101,8 @@ export function buildReportPrompt(args: {
   answers: InterviewAnswer[];
   evaluations: InterviewEvaluation[];
   scoreSummary: { countEvaluated: number; avg: { technical: number; communication: number; problemSolving: number; overall: number } };
-  securityEvents?: Array<{ event: string; timestamp: number; details?: Record<string, any> }>;
-  tabSwitchCount?: number;
 }) {
-  const { mode, role, level, resumeText, jdText, questions, answers, evaluations, scoreSummary, securityEvents, tabSwitchCount } = args;
+  const { mode, role, level, resumeText, jdText, questions, answers, evaluations, scoreSummary } = args;
 
   const instructions = [
     "You are a senior hiring manager writing an interview debrief report.",
@@ -121,13 +119,7 @@ export function buildReportPrompt(args: {
         evidence: [
           { claim: "string", supportingAnswerSnippet: "string", relatedQuestionId: "q1", evidenceType: "technical" }
         ],
-        nextRoundFocus: ["..."],
-        securitySummary: {
-          tabSwitchCount: 0,
-          securityEventCount: 0,
-          criticalEvents: ["..."],
-          summary: "string"
-        }
+        nextRoundFocus: ["..."]
       },
       null,
       2
@@ -149,13 +141,7 @@ export function buildReportPrompt(args: {
     "  * relatedQuestionId: question ID",
     "  * evidenceType: one of 'technical', 'leadership', 'communication', 'problem_solving'",
     "- nextRoundFocus: 4-6 bullets",
-    "- securitySummary: Include ONLY if tabSwitchCount > 0 OR securityEventCount > 0. Must include:",
-    "  * tabSwitchCount: number of tab switches",
-    "  * securityEventCount: total number of security events",
-    "  * criticalEvents: array of critical event types (e.g., 'devtools_detected', 'screenshot_attempt', 'clipboard_write', 'keyboard_shortcut_blocked', 'right_click_blocked')",
-    "  * summary: 2-3 sentence assessment of security concerns and their impact on interview integrity",
-    "- Base your claims on the answers. Do not invent. Reference specific examples from the transcript.",
-    "- If security events exist, mention them in gapsAndRisks if they indicate potential integrity concerns."
+    "- Base your claims on the answers. Do not invent. Reference specific examples from the transcript."
   ].join("\n");
 
   const roleInfo =
@@ -190,20 +176,6 @@ export function buildReportPrompt(args: {
 
   const scoreBlock = `SCORE SUMMARY:\nCountEvaluated=${scoreSummary.countEvaluated}, OverallAvg=${scoreSummary.avg.overall}, TechAvg=${scoreSummary.avg.technical}, CommsAvg=${scoreSummary.avg.communication}, PSAvg=${scoreSummary.avg.problemSolving}`;
 
-  // Security information block
-  let securityBlock = "";
-  if (tabSwitchCount || (securityEvents && securityEvents.length > 0)) {
-    const criticalEvents = securityEvents?.filter(e => 
-      ["devtools_detected", "screenshot_attempt", "clipboard_write", "keyboard_shortcut_blocked", "right_click_blocked"].includes(e.event)
-    ).map(e => e.event) || [];
-    
-    securityBlock = `\nSECURITY MONITORING:\nTab Switches: ${tabSwitchCount || 0}\nSecurity Events: ${securityEvents?.length || 0}\nCritical Events: ${criticalEvents.join(", ") || "none"}\n`;
-    
-    if (securityEvents && securityEvents.length > 0) {
-      securityBlock += `Event Details:\n${securityEvents.map(e => `- ${e.event} at ${new Date(e.timestamp).toISOString()}`).join("\n")}\n`;
-    }
-  }
-
-  return `${instructions}\n\n${roleInfo}\n${jdBlock}${resumeBlock}\n${scoreBlock}${securityBlock}\n\nINTERVIEW TRANSCRIPT:\n${transcript}`;
+  return `${instructions}\n\n${roleInfo}\n${jdBlock}${resumeBlock}\n${scoreBlock}\n\nINTERVIEW TRANSCRIPT:\n${transcript}`;
 }
 

@@ -9,13 +9,7 @@ export default async function SharePage({
 }: {
   params: { token: string };
 }) {
-  let session;
-  try {
-    session = await findSessionByShareToken(params.token);
-  } catch (error) {
-    console.error('Error finding session by share token:', error);
-    notFound();
-  }
+  const session = await findSessionByShareToken(params.token);
 
   if (!session || !session.report) {
     notFound();

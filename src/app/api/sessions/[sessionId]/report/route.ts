@@ -1,14 +1,13 @@
-import { NextResponse } from "next/server";
 import { getSession, updateSession, logAudit } from "@/lib/unifiedStore";
 import { getOpenAI } from "@/lib/openai";
 import { buildReportPrompt } from "@/lib/prompts";
 import { InterviewReport } from "@/lib/types";
 import { apiSuccess, apiError } from "@/lib/apiResponse";
 
-// Configure for production
-export const dynamic = 'force-dynamic';
-export const revalidate = 0;
-export const maxDuration = 60; // Report generation can take time
+// Vercel serverless function configuration
+export const maxDuration = 60; // 60 seconds for OpenAI API calls
+export const dynamic = 'force-dynamic'; // Disable caching
+
 
 function clampInt(n: unknown, min: number, max: number) {
   const x = typeof n === "number" ? n : Number(n);
@@ -56,14 +55,14 @@ function isGenericFiller(text: string): boolean {
   return false;
 }
 
-function normalizeReport(parsed: any, scoreSummary: { countEvaluated: number; avg: { overall: number } }, securityEvents?: Array<{ event: string; timestamp: number; details?: Record<string, any> }>, tabSwitchCount?: number): InterviewReport {
+function normalizeReport(parsed: any, scoreSummary: { countEvaluated: number; avg: { overall: number } }): InterviewReport {
   const rec = String(parsed?.recommendation ?? "borderline");
   const allowed = new Set(["strong_hire", "hire", "borderline", "no_hire"]);
   const recommendation = allowed.has(rec) ? (rec as any) : "borderline";
 
   // Clamp and cap confidence based on scoreSummary
   let confidence = clampInt(parsed?.confidence, 0, 100);
-  
+
   // Cap based on countEvaluated
   if (scoreSummary.countEvaluated < 3) {
     confidence = Math.min(confidence, 70);
@@ -72,7 +71,7 @@ function normalizeReport(parsed: any, scoreSummary: { countEvaluated: number; av
   } else {
     confidence = Math.min(confidence, 95);
   }
-  
+
   // Cap based on overallAvg
   if (scoreSummary.avg.overall < 7) {
     confidence = Math.min(confidence, 80);
@@ -86,7 +85,7 @@ function normalizeReport(parsed: any, scoreSummary: { countEvaluated: number; av
   let strengths = Array.isArray(parsed?.strengths)
     ? parsed.strengths.map((s: any) => String(s).slice(0, 160)).filter((s: string) => s.length > 0)
     : [];
-  
+
   // Ensure 4-7 items
   if (strengths.length < 4) {
     const fallbacks = [
@@ -102,10 +101,10 @@ function normalizeReport(parsed: any, scoreSummary: { countEvaluated: number; av
   // Filter generic filler and clamp gapsAndRisks to 4-7
   let gapsAndRisks = Array.isArray(parsed?.gapsAndRisks)
     ? parsed.gapsAndRisks
-        .map((s: any) => String(s).slice(0, 160))
-        .filter((s: string) => s.length > 0 && !isGenericFiller(s))
+      .map((s: any) => String(s).slice(0, 160))
+      .filter((s: string) => s.length > 0 && !isGenericFiller(s))
     : [];
-  
+
   // Ensure 4-7 items
   if (gapsAndRisks.length < 4) {
     const fallbacks = [
@@ -121,46 +120,25 @@ function normalizeReport(parsed: any, scoreSummary: { countEvaluated: number; av
   // Normalize evidence with evidenceType
   const evidence = Array.isArray(parsed?.evidence)
     ? parsed.evidence
-        .map((e: any) => {
-          const evidenceType = String(e?.evidenceType ?? "technical").toLowerCase();
-          const allowedTypes = ["technical", "leadership", "communication", "problem_solving"];
-          const validType = allowedTypes.includes(evidenceType) ? evidenceType : "technical";
-          
-          return {
-            claim: String(e?.claim ?? "").slice(0, 160),
-            supportingAnswerSnippet: String(e?.supportingAnswerSnippet ?? "").slice(0, 160),
-            relatedQuestionId: String(e?.relatedQuestionId ?? "").slice(0, 40),
-            evidenceType: validType as "technical" | "leadership" | "communication" | "problem_solving",
-          };
-        })
-        .filter((e: any) => e.claim && e.supportingAnswerSnippet && e.relatedQuestionId)
-        .slice(0, 6)
+      .map((e: any) => {
+        const evidenceType = String(e?.evidenceType ?? "technical").toLowerCase();
+        const allowedTypes = ["technical", "leadership", "communication", "problem_solving"];
+        const validType = allowedTypes.includes(evidenceType) ? evidenceType : "technical";
+
+        return {
+          claim: String(e?.claim ?? "").slice(0, 160),
+          supportingAnswerSnippet: String(e?.supportingAnswerSnippet ?? "").slice(0, 160),
+          relatedQuestionId: String(e?.relatedQuestionId ?? "").slice(0, 40),
+          evidenceType: validType as "technical" | "leadership" | "communication" | "problem_solving",
+        };
+      })
+      .filter((e: any) => e.claim && e.supportingAnswerSnippet && e.relatedQuestionId)
+      .slice(0, 6)
     : [];
 
   const nextRoundFocus = Array.isArray(parsed?.nextRoundFocus)
     ? parsed.nextRoundFocus.map((s: any) => String(s).slice(0, 160)).slice(0, 6)
     : [];
-
-  // Normalize security summary
-  let securitySummary: InterviewReport["securitySummary"] = undefined;
-  const securityEventCount = securityEvents?.length || 0;
-  const tabSwitches = tabSwitchCount || 0;
-  
-  if (tabSwitches > 0 || securityEventCount > 0) {
-    const criticalEvents = securityEvents?.filter(e => 
-      ["devtools_detected", "screenshot_attempt", "clipboard_write", "keyboard_shortcut_blocked", "right_click_blocked"].includes(e.event)
-    ).map(e => e.event) || [];
-    
-    securitySummary = {
-      tabSwitchCount: tabSwitches,
-      securityEventCount: securityEventCount,
-      criticalEvents: Array.isArray(parsed?.securitySummary?.criticalEvents) 
-        ? parsed.securitySummary.criticalEvents.map((e: any) => String(e)).slice(0, 10)
-        : criticalEvents.slice(0, 10),
-      summary: String(parsed?.securitySummary?.summary || "").slice(0, 300) || 
-        `Interview monitoring detected ${tabSwitches} tab switch${tabSwitches > 1 ? "es" : ""} and ${securityEventCount} security event${securityEventCount > 1 ? "s" : ""}. ${criticalEvents.length > 0 ? `Critical events include: ${criticalEvents.join(", ")}.` : ""} These may indicate potential integrity concerns that should be considered in the hiring decision.`,
-    };
-  }
 
   return {
     recommendation,
@@ -181,15 +159,14 @@ function normalizeReport(parsed: any, scoreSummary: { countEvaluated: number; av
     evidence: evidence.length
       ? evidence
       : [
-          {
-            claim: "Limited evidence captured in this session.",
-            supportingAnswerSnippet: "Provide more detailed examples in the next round.",
-            relatedQuestionId: "n/a",
-            evidenceType: "technical" as const,
-          },
-        ],
+        {
+          claim: "Limited evidence captured in this session.",
+          supportingAnswerSnippet: "Provide more detailed examples in the next round.",
+          relatedQuestionId: "n/a",
+          evidenceType: "technical" as const,
+        },
+      ],
     nextRoundFocus: nextRoundFocus.length ? nextRoundFocus : ["Ask for concrete examples and metrics."],
-    securitySummary,
   };
 }
 
@@ -202,8 +179,8 @@ export async function GET(
     return apiError("Session not found", "The requested session does not exist", 404);
   }
 
-  return apiSuccess({ 
-    report: session.report ?? null, 
+  return apiSuccess({
+    report: session.report ?? null,
     status: session.status,
     scoreSummary: session.scoreSummary,
     shareToken: session.shareToken ?? null,
@@ -253,15 +230,10 @@ export async function POST(
     answers: session.answers,
     evaluations: session.evaluations,
     scoreSummary: session.scoreSummary,
-    securityEvents: session.securityEvents,
-    tabSwitchCount: session.tabSwitchCount,
   });
 
   const openai = getOpenAI();
-  
-  // Add timeout for OpenAI call (25 seconds to leave buffer for other operations)
-  const openaiTimeout = 25000;
-  const openaiPromise = openai.chat.completions.create({
+  const resp = await openai.chat.completions.create({
     model: "gpt-4o-mini",
     temperature: 0.2,
     response_format: { type: "json_object" } as any,
@@ -271,40 +243,30 @@ export async function POST(
     ],
   });
 
-  const timeoutPromise = new Promise<never>((_, reject) => {
-    setTimeout(() => reject(new Error('OpenAI API timeout')), openaiTimeout);
-  });
-
-  let resp;
-  try {
-    resp = await Promise.race([openaiPromise, timeoutPromise]);
-  } catch (error) {
-    if (error instanceof Error && error.message === 'OpenAI API timeout') {
-      return apiError(
-        "Request timeout",
-        "Report generation took too long. Please try again.",
-        504
-      );
-    }
-    throw error;
-  }
-
   const raw = resp.choices[0]?.message?.content ?? "";
   let parsed: any;
 
   try {
     parsed = safeJsonParse(raw);
   } catch {
-    return NextResponse.json({ error: "Failed to parse report JSON", raw }, { status: 500 });
+    return apiError(
+      "Failed to parse report JSON",
+      "The AI model returned invalid JSON",
+      500,
+      { raw: raw.substring(0, 500) }
+    );
   }
 
-  const report = normalizeReport(parsed, session.scoreSummary, session.securityEvents, session.tabSwitchCount);
+  const report = normalizeReport(parsed, session.scoreSummary);
 
   // Generate shareToken if not present
   const shareToken = session.shareToken || crypto.randomUUID().replaceAll("-", "");
 
   await updateSession(params.sessionId, (s) => ({ ...s, report, shareToken }));
 
-  return NextResponse.json({ ok: true, report, cached: false, shareToken });
+  return apiSuccess(
+    { report, cached: false, shareToken },
+    "Report generated successfully"
+  );
 }
 

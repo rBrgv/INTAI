@@ -1,21 +1,22 @@
-import Link from "next/link";
+"use client";
 
-export default function Home() {
+import { useEffect } from "react";
+import { useRouter } from "next/navigation";
+
+export default function HomePage() {
+  const router = useRouter();
+
+  useEffect(() => {
+    // Redirect directly to college dashboard to see templates
+    router.push("/college/dashboard");
+  }, [router]);
+
   return (
-    <main className="mx-auto max-w-3xl p-8">
-      <h1 className="text-3xl font-semibold text-[var(--text)]">AI Interview Platform</h1>
-      <p className="mt-3 text-[var(--muted)]">
-        Enterprise AI-powered interview platform for candidate evaluation.
-      </p>
-      <div className="mt-8">
-        <Link
-          href="/mode"
-          className="app-btn-primary inline-flex items-center px-6 py-2.5"
-        >
-          Get started
-        </Link>
+    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-slate-50 to-slate-100">
+      <div className="text-center">
+        <div className="inline-block animate-spin rounded-full h-12 w-12 border-b-2 border-indigo-600 mb-4"></div>
+        <p className="text-slate-600">Redirecting to Dashboard...</p>
       </div>
-    </main>
+    </div>
   );
 }
-

@@ -65,7 +65,9 @@ export default function CohortAnalytics({ templateId }: CohortAnalyticsProps) {
           throw new Error("Failed to fetch analytics");
         }
         const json = await res.json();
-        setData(json);
+        // Handle standardized API response format
+        const responseData = json.data || json;
+        setData(responseData);
       } catch (err) {
         setError(err instanceof Error ? err.message : "Failed to load analytics");
       } finally {

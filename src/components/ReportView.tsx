@@ -1,10 +1,7 @@
-"use client";
-
-import { ArrowRight, CheckCircle2, FileDown, AlertTriangle, Lock, X } from "lucide-react";
-import { useRouter } from "next/navigation";
+import { ArrowRight, CheckCircle2, FileDown } from "lucide-react";
 import Card from "./Card";
 import Badge from "./Badge";
-import { sanitizeForDisplaySync } from "@/lib/sanitize";
+import { sanitizeForDisplay } from "@/lib/sanitize";
 
 type ReportViewProps = {
   report: {
@@ -20,12 +17,6 @@ type ReportViewProps = {
       evidenceType?: "technical" | "leadership" | "communication" | "problem_solving";
     }>;
     nextRoundFocus: string[];
-    securitySummary?: {
-      tabSwitchCount: number;
-      securityEventCount: number;
-      criticalEvents: string[];
-      summary: string;
-    };
   };
   scoreSummary?: {
     countEvaluated: number;
@@ -52,16 +43,10 @@ export default function ReportView({
   readOnly = false,
   viewType = "recruiter",
 }: ReportViewProps) {
-  const router = useRouter();
-  
   // For candidate view, hide "no_hire" recommendation and show "borderline" instead
-  const displayRecommendation = viewType === "candidate" && report.recommendation === "no_hire" 
-    ? "borderline" 
+  const displayRecommendation = viewType === "candidate" && report.recommendation === "no_hire"
+    ? "borderline"
     : report.recommendation;
-
-  const handleExit = () => {
-    router.push("/");
-  };
 
   const handleExportPDF = () => {
     // Add metadata to document before printing
@@ -135,16 +120,9 @@ export default function ReportView({
 
   return (
     <div className="space-y-6" data-report-content>
-      {/* Action Buttons - At the top */}
+      {/* Export Button - At the top */}
       {!readOnly && (
-        <div className="flex justify-between items-center no-print mb-2">
-          <button
-            onClick={handleExit}
-            className="app-btn-secondary px-4 py-2 text-sm flex items-center gap-2 hover:bg-slate-100 transition-colors"
-          >
-            <X className="w-4 h-4" />
-            Exit
-          </button>
+        <div className="flex justify-end no-print mb-2">
           <button
             onClick={handleExportPDF}
             className="app-btn-primary px-4 py-2 text-sm flex items-center gap-2"
@@ -155,28 +133,29 @@ export default function ReportView({
         </div>
       )}
       {/* Hero Header */}
-      <div className="rounded-lg bg-gradient-to-r from-blue-50 to-indigo-50 border border-blue-200 p-6">
+      {/* Hero Header */}
+      <div className="rounded-lg bg-gradient-to-r from-blue-900/20 to-indigo-900/20 border border-white/10 p-6">
         <div className="flex items-center justify-between mb-3">
-          <h4 className="text-lg font-semibold text-slate-900">Recommendation</h4>
+          <h4 className="text-lg font-semibold text-white">Recommendation</h4>
           <Badge
             variant={
               displayRecommendation === "strong_hire"
                 ? "success"
                 : displayRecommendation === "hire"
-                ? "info"
-                : displayRecommendation === "borderline"
-                ? "warning"
-                : "error"
+                  ? "info"
+                  : displayRecommendation === "borderline"
+                    ? "warning"
+                    : "error"
             }
           >
             {displayRecommendation.replace("_", " ").toUpperCase()}
           </Badge>
         </div>
-        <p className="text-sm text-slate-600 mb-2">
-          Confidence: <span className="font-semibold">{report.confidence}%</span>
+        <p className="text-sm text-slate-400 mb-2">
+          Confidence: <span className="font-semibold text-white">{report.confidence}%</span>
         </p>
-        <p className="text-sm text-slate-700 whitespace-pre-line leading-relaxed">
-          {sanitizeForDisplaySync(report.executiveSummary)}
+        <p className="text-sm text-slate-300 whitespace-pre-line leading-relaxed">
+          {sanitizeForDisplay(report.executiveSummary)}
         </p>
       </div>
 
@@ -187,25 +166,25 @@ export default function ReportView({
             {context.mode && (
               <div>
                 <span className="text-slate-500">Mode:</span>{" "}
-                <span className="font-medium">
-                  {context.mode === "company" 
-                    ? "Company" 
+                <span className="font-medium text-slate-300">
+                  {context.mode === "company"
+                    ? "Company"
                     : context.mode === "college"
-                    ? "College"
-                    : "Individual"}
+                      ? "College"
+                      : "Individual"}
                 </span>
               </div>
             )}
             {context.role && (
               <div>
                 <span className="text-slate-500">Role:</span>{" "}
-                <span className="font-medium">{context.role}</span>
+                <span className="font-medium text-slate-300">{context.role}</span>
               </div>
             )}
             {context.level && (
               <div>
                 <span className="text-slate-500">Level:</span>{" "}
-                <span className="font-medium">{context.level}</span>
+                <span className="font-medium text-slate-300">{context.level}</span>
               </div>
             )}
           </div>
@@ -228,11 +207,11 @@ export default function ReportView({
       {/* Strengths vs Gaps */}
       <div className="grid md:grid-cols-2 gap-4">
         <Card variant="outlined">
-          <h5 className="text-sm font-semibold text-slate-900 mb-3">Strengths</h5>
-          <ul className="space-y-2 text-sm text-slate-700">
+          <h5 className="text-sm font-semibold text-white mb-3">Strengths</h5>
+          <ul className="space-y-2 text-sm text-slate-300">
             {report.strengths.map((s, i) => (
               <li key={i} className="flex items-start">
-                <CheckCircle2 className="w-3 h-3 text-green-600 mr-2 mt-0.5 inline" />
+                <CheckCircle2 className="w-3 h-3 text-green-500 mr-2 mt-0.5 inline" />
                 {s}
               </li>
             ))}
@@ -240,12 +219,12 @@ export default function ReportView({
         </Card>
 
         <Card variant="outlined">
-          <h5 className="text-sm font-semibold text-slate-900 mb-3">Gaps / Risks</h5>
-          <ul className="space-y-2 text-sm text-slate-700">
+          <h5 className="text-sm font-semibold text-white mb-3">Gaps / Risks</h5>
+          <ul className="space-y-2 text-sm text-slate-300">
             {report.gapsAndRisks.map((g, i) => (
               <li key={i} className="flex items-start">
-                <ArrowRight className="w-3 h-3 text-yellow-600 mr-2 mt-0.5 inline" />
-                {sanitizeForDisplaySync(g)}
+                <ArrowRight className="w-3 h-3 text-yellow-500 mr-2 mt-0.5 inline" />
+                {sanitizeForDisplay(g)}
               </li>
             ))}
           </ul>
@@ -254,18 +233,18 @@ export default function ReportView({
 
       {/* Evidence Highlights */}
       <Card>
-        <h5 className="text-sm font-semibold text-slate-900 mb-4">Evidence Highlights</h5>
+        <h5 className="text-sm font-semibold text-white mb-4">Evidence Highlights</h5>
         <div className="space-y-3">
           {report.evidence.map((e, i) => (
-            <div key={i} className="rounded-md bg-slate-50 border border-slate-200 p-4">
+            <div key={i} className="rounded-md bg-white/5 border border-white/10 p-4">
               <div className="flex items-start justify-between mb-2">
-                <p className="text-sm font-medium text-slate-900 flex-1">{sanitizeForDisplaySync(e.claim)}</p>
+                <p className="text-sm font-medium text-white flex-1">{sanitizeForDisplay(e.claim)}</p>
                 <Badge variant="info" className="ml-2">
                   {(e.evidenceType || "technical").replace("_", " ")}
                 </Badge>
               </div>
-              <p className="text-sm text-slate-600 italic mb-1">
-                "{sanitizeForDisplaySync(e.supportingAnswerSnippet)}"
+              <p className="text-sm text-slate-400 italic mb-1">
+                "{sanitizeForDisplay(e.supportingAnswerSnippet)}"
               </p>
               <p className="text-xs text-slate-500">Question: {e.relatedQuestionId}</p>
             </div>
@@ -275,64 +254,16 @@ export default function ReportView({
 
       {/* Next Round Focus */}
       <Card variant="outlined">
-        <h5 className="text-sm font-semibold text-slate-900 mb-3">Next Round Focus</h5>
-        <ul className="space-y-2 text-sm text-slate-700">
-            {report.nextRoundFocus.map((n, i) => (
-              <li key={i} className="flex items-start">
-                <span className="text-blue-600 mr-2 mt-0.5">•</span>
-                {sanitizeForDisplaySync(n)}
-              </li>
-            ))}
+        <h5 className="text-sm font-semibold text-white mb-3">Next Round Focus</h5>
+        <ul className="space-y-2 text-sm text-slate-300">
+          {report.nextRoundFocus.map((n, i) => (
+            <li key={i} className="flex items-start">
+              <span className="text-blue-500 mr-2 mt-0.5">•</span>
+              {sanitizeForDisplay(n)}
+            </li>
+          ))}
         </ul>
       </Card>
-
-      {/* Security Summary */}
-      {report.securitySummary && (report.securitySummary.tabSwitchCount > 0 || report.securitySummary.securityEventCount > 0) && (
-        <Card variant="outlined" className="border-red-200 bg-red-50/50">
-          <div className="flex items-center gap-2 mb-3">
-            <Lock className="w-4 h-4 text-red-600" />
-            <h5 className="text-sm font-semibold text-slate-900">Security Monitoring Summary</h5>
-          </div>
-          
-          <div className="grid md:grid-cols-2 gap-4 mb-4">
-            <div>
-              <p className="text-xs text-slate-600 mb-1">Tab Switches</p>
-              <p className="text-lg font-bold text-red-700">
-                {report.securitySummary.tabSwitchCount}
-              </p>
-            </div>
-            <div>
-              <p className="text-xs text-slate-600 mb-1">Security Events</p>
-              <p className="text-lg font-bold text-red-700">
-                {report.securitySummary.securityEventCount}
-              </p>
-            </div>
-          </div>
-
-          {report.securitySummary.criticalEvents && report.securitySummary.criticalEvents.length > 0 && (
-            <div className="mb-4">
-              <p className="text-xs font-medium text-slate-900 mb-2">Critical Events Detected</p>
-              <ul className="space-y-1">
-                {report.securitySummary.criticalEvents.map((event, i) => (
-                  <li key={i} className="flex items-start text-xs text-slate-700">
-                    <AlertTriangle className="w-3 h-3 text-red-600 mr-2 mt-0.5 flex-shrink-0" />
-                    <span>{event.replace(/_/g, " ").replace(/\b\w/g, l => l.toUpperCase())}</span>
-                  </li>
-                ))}
-              </ul>
-            </div>
-          )}
-
-          {report.securitySummary.summary && (
-            <div className="pt-3 border-t border-red-200">
-              <p className="text-xs font-medium text-slate-900 mb-1">Security Assessment</p>
-              <p className="text-xs text-slate-700 leading-relaxed">
-                {sanitizeForDisplaySync(report.securitySummary.summary)}
-              </p>
-            </div>
-          )}
-        </Card>
-      )}
     </div>
   );
 }

@@ -9,8 +9,6 @@ export function getOpenAI(): OpenAI {
       const env = getEnv();
       _openai = new OpenAI({
         apiKey: env.OPENAI_API_KEY,
-        timeout: 30000, // 30 second timeout for API calls
-        maxRetries: 2, // Reduce retries to fail faster in production
       });
     } catch (error) {
       throw new Error(

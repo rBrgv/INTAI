@@ -65,6 +65,7 @@ export const SessionCreateSchema = z.object({
 // Answer Submission Schema
 export const AnswerSubmitSchema = z.object({
   answerText: z.string().min(10, 'Answer must be at least 10 characters'),
+  questionDisplayedAt: z.number().optional(), // Timestamp when question was displayed
 });
 
 // Skills Extraction Schema

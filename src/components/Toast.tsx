@@ -1,97 +1,103 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { X } from "lucide-react";
-import Card from "./Card";
+import { useEffect } from "react";
+import { CheckCircle2, XCircle, AlertCircle, Info, X } from "lucide-react";
 
-export type ToastType = "success" | "error" | "info" | "warning";
+export type ToastType = "success" | "error" | "warning" | "info";
 
-type ToastProps = {
+export type Toast = {
+  id: string;
   message: string;
-  type?: ToastType;
+  type?: ToastType; // Make optional for backward compatibility
   duration?: number;
-  onClose?: () => void;
 };
 
-export default function Toast({
-  message,
-  type = "info",
-  duration = 3000,
-  onClose,
-}: ToastProps) {
-  const [isVisible, setIsVisible] = useState(true);
+type ToastProps = {
+  toast: Toast;
+  onClose: (id: string) => void;
+};
 
+export function ToastComponent({ toast, onClose }: ToastProps) {
   useEffect(() => {
-    if (duration > 0) {
+    if (toast.duration !== 0) {
       const timer = setTimeout(() => {
-        setIsVisible(false);
-        setTimeout(() => onClose?.(), 300); // Wait for fade out
-      }, duration);
-
+        onClose(toast.id);
+      }, toast.duration || 5000);
       return () => clearTimeout(timer);
     }
-  }, [duration, onClose]);
+  }, [toast.id, toast.duration, onClose]);
 
-  const typeStyles = {
-    success: "bg-green-50 border-green-200 text-green-800",
-    error: "bg-red-50 border-red-200 text-red-800",
-    info: "bg-blue-50 border-blue-200 text-blue-800",
-    warning: "bg-yellow-50 border-yellow-200 text-yellow-800",
+  const icons = {
+    success: CheckCircle2,
+    error: XCircle,
+    warning: AlertCircle,
+    info: Info,
   };
 
-  if (!isVisible) return null;
+  const colors = {
+    success: "bg-green-50 border-green-200 text-green-800",
+    error: "bg-red-50 border-red-200 text-red-800",
+    warning: "bg-yellow-50 border-yellow-200 text-yellow-800",
+    info: "bg-blue-50 border-blue-200 text-blue-800",
+  };
+
+  const iconColors = {
+    success: "text-green-600",
+    error: "text-red-600",
+    warning: "text-yellow-600",
+    info: "text-blue-600",
+  };
+
+  const toastType = toast.type || "info";
+
+  const Icon = icons[toastType];
 
   return (
     <div
-      className={`transition-all duration-300 ${
-        isVisible ? "opacity-100 translate-y-0" : "opacity-0 -translate-y-2"
-      }`}
+      className={`flex items-start gap-3 p-4 rounded-lg border ${colors[toastType]} shadow-lg min-w-[300px] max-w-[500px] animate-in slide-in-from-right`}
     >
-      <Card className={`${typeStyles[type]} border shadow-lg min-w-[300px] max-w-md`}>
-        <div className="flex items-center justify-between p-4">
-          <p className="text-sm font-medium">{message}</p>
-          <button
-            onClick={() => {
-              setIsVisible(false);
-              setTimeout(() => onClose?.(), 300);
-            }}
-            className="ml-4 text-current opacity-70 hover:opacity-100"
-          >
-            <X className="w-4 h-4" />
-          </button>
-        </div>
-      </Card>
+      <Icon className={`w-5 h-5 flex-shrink-0 mt-0.5 ${iconColors[toastType]}`} />
+      <p className="flex-1 text-sm font-medium">{toast.message}</p>
+      <button
+        onClick={() => onClose(toast.id)}
+        className="flex-shrink-0 text-current opacity-60 hover:opacity-100 transition-opacity"
+      >
+        <X className="w-4 h-4" />
+      </button>
     </div>
   );
 }
 
-type ToastManagerProps = {
-  toasts: Array<{ id: string; message: string; type?: ToastType }>;
-  onRemove: (id: string) => void;
-};
-
-export function ToastManager({ toasts, onRemove }: ToastManagerProps) {
-  if (toasts.length === 0) return null;
-
+export function ToastContainer({ toasts, onClose }: { toasts: Toast[]; onClose: (id: string) => void }) {
   return (
-    <div className="fixed top-4 right-4 z-50 space-y-2">
-      {toasts.map((toast, index) => (
-        <div
-          key={toast.id}
-          className="transition-all duration-300"
-          style={{
-            transform: `translateY(${index * 8}px)`,
-            zIndex: 50 - index,
-          }}
-        >
-          <Toast
-            message={toast.message}
-            type={toast.type}
-            onClose={() => onRemove(toast.id)}
-          />
+    <div className="fixed top-4 right-4 z-50 flex flex-col gap-2 pointer-events-none">
+      {toasts.map((toast) => (
+        <div key={toast.id} className="pointer-events-auto">
+          <ToastComponent toast={toast} onClose={onClose} />
         </div>
       ))}
     </div>
   );
 }
 
+// Alias for backward compatibility
+export const ToastManager = ToastContainer;
+
+import React from "react";
+
+// Hook for managing toasts
+export function useToast() {
+  const [toasts, setToasts] = React.useState<Toast[]>([]);
+
+  const showToast = (message: string, type: ToastType = "info", duration?: number) => {
+    const id = Math.random().toString(36).substring(7);
+    setToasts((prev) => [...prev, { id, message, type, duration }]);
+    return id;
+  };
+
+  const removeToast = (id: string) => {
+    setToasts((prev) => prev.filter((t) => t.id !== id));
+  };
+
+  return { toasts, showToast, removeToast };
+}

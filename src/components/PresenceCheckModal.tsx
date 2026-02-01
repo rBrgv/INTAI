@@ -170,7 +170,7 @@ export default function PresenceCheckModal({
         {step === "photo" && (
           <div className="space-y-4">
             <div>
-              <p className="text-sm font-medium text-slate-700 mb-2">Step 1: Take a photo</p>
+              <p className="text-sm font-medium text-slate-300 mb-2">Step 1: Take a photo</p>
               {cameraError ? (
                 <div className="rounded-md bg-yellow-50 border border-yellow-200 p-4">
                   <p className="text-sm text-yellow-800">{cameraError}</p>
@@ -208,16 +208,26 @@ export default function PresenceCheckModal({
             </div>
 
             <div className="flex gap-3">
+              {photoDataUrl && (
+                <button
+                  onClick={handleSave}
+                  disabled={saving}
+                  className="flex-1 rounded-md bg-green-600 px-4 py-2 text-white font-medium hover:bg-green-700 disabled:opacity-60 disabled:cursor-not-allowed"
+                >
+                  {saving ? "Saving..." : "Save photo & continue"}
+                </button>
+              )}
               <button
                 onClick={() => setStep("phrase")}
-                disabled={!photoDataUrl && !cameraError}
+                disabled={saving}
                 className="flex-1 rounded-md bg-black px-4 py-2 text-white font-medium hover:bg-slate-800 disabled:opacity-60 disabled:cursor-not-allowed"
               >
-                Continue to phrase
+                {photoDataUrl ? "Continue to phrase" : "Skip photo, go to phrase"}
               </button>
               <button
                 onClick={handleSkip}
-                className="px-4 py-2 text-sm text-slate-600 hover:text-slate-800"
+                disabled={saving}
+                className="px-4 py-2 text-sm text-slate-600 hover:text-slate-800 disabled:opacity-60"
               >
                 Skip for now
               </button>
@@ -228,7 +238,7 @@ export default function PresenceCheckModal({
         {step === "phrase" && (
           <div className="space-y-4">
             <div>
-              <p className="text-sm font-medium text-slate-700 mb-2">Step 2: Speak a phrase</p>
+              <p className="text-sm font-medium text-slate-300 mb-2">Step 2: Speak a phrase</p>
               <div className="rounded-md bg-blue-50 border border-blue-200 p-4 mb-3">
                 <p className="text-sm font-medium text-blue-900 mb-1">Please say:</p>
                 <p className="text-sm text-blue-700">{phrasePrompt}</p>

@@ -18,8 +18,8 @@ export default function NotFound() {
             <Link href="/" className="app-btn-primary px-6 py-2.5">
               Go home
             </Link>
-            <Link href="/mode" className="app-btn-secondary px-6 py-2.5">
-              Start Interview
+            <Link href="/college/dashboard" className="app-btn-secondary px-6 py-2.5">
+              Dashboard
             </Link>
           </div>
         </div>
