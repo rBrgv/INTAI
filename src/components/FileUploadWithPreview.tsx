@@ -4,7 +4,7 @@ import { useState, useRef, useEffect } from "react";
 import { Check } from "lucide-react";
 import Card from "./Card";
 import mammoth from "mammoth";
-import { sanitizeForStorage, sanitizeHtml } from "@/lib/sanitize";
+import { sanitizeForStorage } from "@/lib/sanitize";
 import { clientLogger } from "@/lib/clientLogger";
 
 type FileUploadWithPreviewProps = {
@@ -82,7 +82,7 @@ export default function FileUploadWithPreview({
     const syntheticEvent = {
       target: { files: [droppedFile] },
     } as unknown as React.ChangeEvent<HTMLInputElement>;
-    
+
     await handleFileSelect(syntheticEvent);
   };
 
@@ -94,16 +94,16 @@ export default function FileUploadWithPreview({
     onFileChange?.(selectedFile);
     setExtractionError(null); // Clear any previous errors
 
-    const isDocx = selectedFile.name.toLowerCase().endsWith(".docx") || 
-                  selectedFile.name.toLowerCase().endsWith(".doc");
-    const isPdf = selectedFile.type === "application/pdf" || 
-                  selectedFile.name.toLowerCase().endsWith(".pdf");
+    const isDocx = selectedFile.name.toLowerCase().endsWith(".docx") ||
+      selectedFile.name.toLowerCase().endsWith(".doc");
+    const isPdf = selectedFile.type === "application/pdf" ||
+      selectedFile.name.toLowerCase().endsWith(".pdf");
 
     // Handle PDF files with pdfjs
     if (isPdf) {
       setIsProcessingPdf(true);
       onProcessingChange?.(true);
-      
+
       // Create preview URL for PDF first
       try {
         const url = URL.createObjectURL(selectedFile);
@@ -112,7 +112,7 @@ export default function FileUploadWithPreview({
       } catch (error) {
         clientLogger.error("Failed to create preview URL", error instanceof Error ? error : new Error(String(error)));
       }
-      
+
       // Extract text from PDF
       try {
         // Load pdfjs from CDN to avoid bundling issues
@@ -121,7 +121,7 @@ export default function FileUploadWithPreview({
           if ((window as any).pdfjsLib) {
             return (window as any).pdfjsLib;
           }
-          
+
           // Check if script is already being loaded
           if ((window as any).pdfjsLoading) {
             // Wait for existing load to complete
@@ -134,7 +134,7 @@ export default function FileUploadWithPreview({
               }, 100);
             });
           }
-          
+
           // Load from CDN
           (window as any).pdfjsLoading = true;
           return new Promise((resolve, reject) => {
@@ -155,7 +155,7 @@ export default function FileUploadWithPreview({
               }, 500);
               return;
             }
-            
+
             const script = document.createElement("script");
             script.src = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js";
             script.onload = () => {
@@ -177,11 +177,11 @@ export default function FileUploadWithPreview({
             document.head.appendChild(script);
           });
         };
-        
+
         const pdfjs = await loadPdfjs() as any;
         const arrayBuffer = await selectedFile.arrayBuffer();
         const pdf = await pdfjs.getDocument({ data: arrayBuffer }).promise;
-        
+
         let extractedText = "";
         // Extract text from all pages
         for (let i = 1; i <= pdf.numPages; i++) {
@@ -192,14 +192,14 @@ export default function FileUploadWithPreview({
             .join(" ");
           extractedText += pageText + "\n\n";
         }
-        
+
         const trimmedText = extractedText.trim();
         if (trimmedText) {
           setText(trimmedText);
           // Call onTextChange to update parent state immediately
           onTextChange?.(trimmedText);
           clientLogger.debug("PDF text extracted", { characterCount: trimmedText.length });
-          
+
           // Upload to Supabase Storage if enabled
           if (enableStorage && selectedFile) {
             await uploadFileToStorage(selectedFile, trimmedText);
@@ -224,14 +224,14 @@ export default function FileUploadWithPreview({
         const arrayBuffer = await selectedFile.arrayBuffer();
         const result = await mammoth.convertToHtml({ arrayBuffer });
         setDocxHtml(result.value);
-        
+
         // Also extract plain text for the textarea
         const textResult = await mammoth.extractRawText({ arrayBuffer });
         if (textResult.value) {
           const sanitizedText = sanitizeForStorage(textResult.value);
           setText(sanitizedText);
           onTextChange?.(sanitizedText);
-          
+
           // Upload to Supabase Storage if enabled
           if (enableStorage && selectedFile) {
             await uploadFileToStorage(selectedFile, textResult.value);
@@ -295,11 +295,10 @@ export default function FileUploadWithPreview({
           onDragOver={handleDragOver}
           onDragLeave={handleDragLeave}
           onDrop={handleDrop}
-          className={`border-2 border-dashed rounded-lg p-6 transition-colors ${
-            isDragging
+          className={`border-2 border-dashed rounded-lg p-6 transition-colors ${isDragging
               ? "border-[var(--primary)] bg-[var(--primary)]/5"
               : "border-[var(--border)] hover:border-[var(--primary)]/50"
-          }`}
+            }`}
         >
           <div className="flex flex-col items-center gap-3">
             <input

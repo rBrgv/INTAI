@@ -3,7 +3,8 @@
  * Protects against XSS attacks by sanitizing user input
  */
 
-import DOMPurify from 'isomorphic-dompurify';
+// DOMPurify is loaded dynamically to avoid server-side bundling issues with jsdom
+// import DOMPurify from 'isomorphic-dompurify'; 
 
 /**
  * Sanitize text by stripping all HTML tags
@@ -13,19 +14,20 @@ export function sanitizeText(text: string): string {
   if (!text || typeof text !== 'string') {
     return '';
   }
-  // Strip all HTML and return plain text
-  return DOMPurify.sanitize(text, { ALLOWED_TAGS: [] });
+  // Strip all HTML tags using regex (lighter than dompurify for server usage)
+  return text.replace(/<[^>]*>?/gm, '');
 }
 
 /**
  * Sanitize HTML content, allowing safe HTML tags
  * Use for content that may contain formatting (e.g., DOCX converted to HTML)
  */
-export function sanitizeHtml(html: string): string {
+export async function sanitizeHtml(html: string): Promise<string> {
   if (!html || typeof html !== 'string') {
     return '';
   }
-  // Allow safe HTML tags but sanitize dangerous content
+  // Dynamic import to avoid ESM/jsdom issues on server start
+  const DOMPurify = (await import('isomorphic-dompurify')).default;
   return DOMPurify.sanitize(html, {
     ALLOWED_TAGS: ['p', 'br', 'strong', 'em', 'u', 'ul', 'ol', 'li', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6'],
     ALLOWED_ATTR: [],
