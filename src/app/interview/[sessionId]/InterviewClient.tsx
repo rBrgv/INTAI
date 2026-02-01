@@ -244,6 +244,8 @@ export default function InterviewClient({ sessionId }: { sessionId: string }) {
     return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
   };
 
+
+
   async function refresh() {
     // Add cache-busting timestamp
     const timestamp = Date.now();
@@ -677,6 +679,24 @@ export default function InterviewClient({ sessionId }: { sessionId: string }) {
   const started = (data?.session.totalQuestions ?? 0) > 0;
   const completed = data?.session.status === "completed";
   const currentQuestionNum = (data?.session.currentQuestionIndex ?? 0) + 1;
+
+  // Auto-start interview if created (skip start screen)
+  useEffect(() => {
+    if (data?.session.status === "created" && !started && !loading && !initialLoading) {
+      startInterview();
+    }
+  }, [data?.session.status, started, loading, initialLoading]);
+
+  // Populate answer if question is already answered
+  useEffect(() => {
+    if (data?.currentQuestion?.id && (data?.session as any)?.answers) {
+      // Check if current question is answered
+      const existing = (data.session as any).answers.find((a: any) => a.questionId === data.currentQuestion?.id);
+      if (existing) {
+        setAnswerText(existing.answerText || "");
+      }
+    }
+  }, [data?.currentQuestion?.id, (data?.session as any)?.answers]);
 
   // Security Monitors (Fullscreen, Tab Switch, Copy/Paste)
   useEffect(() => {
@@ -1278,7 +1298,7 @@ export default function InterviewClient({ sessionId }: { sessionId: string }) {
                     <VoiceAnswerRecorder
                       key={data.currentQuestion.id}
                       onTranscript={(text) => setAnswerText(text)}
-                      disabled={loading || completed}
+                      disabled={loading || completed || !!(data.currentQuestion as any).answered}
                     />
                   </div>
 
@@ -1295,8 +1315,8 @@ export default function InterviewClient({ sessionId }: { sessionId: string }) {
                           e.preventDefault();
                         }
                       }}
-                      placeholder="Type your response here or use voice recording above..."
-                      disabled={loading || completed}
+                      placeholder={(data.currentQuestion as any).answered ? "Answer submitted." : "Type your response here or use voice recording above..."}
+                      disabled={loading || completed || !!(data.currentQuestion as any).answered}
                     />
                     <div className="mt-3 flex items-center justify-between">
                       <div className="flex items-center gap-4">
