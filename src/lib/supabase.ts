@@ -3,17 +3,17 @@ import { createClient } from '@supabase/supabase-js';
 // Initialize Supabase client
 // These should be set in your .env.local file
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
-const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
+const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
 
-if (!supabaseUrl || !supabaseAnonKey) {
+if (!supabaseUrl || !supabaseKey) {
   // Note: Using logger here would cause circular dependency, so we keep console.warn for this initialization message
   if (process.env.NODE_ENV === 'development') {
-    console.warn('Supabase URL or Anon Key not found. Using in-memory store fallback.');
+    console.warn('Supabase URL or Key not found. Using in-memory store fallback.');
   }
 }
 
-export const supabase = supabaseUrl && supabaseAnonKey
-  ? createClient(supabaseUrl, supabaseAnonKey)
+export const supabase = supabaseUrl && supabaseKey
+  ? createClient(supabaseUrl, supabaseKey)
   : null;
 
 // Helper to check if Supabase is configured
