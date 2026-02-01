@@ -39,7 +39,8 @@ export async function POST(
       const response = apiSuccess(
         {
           alreadyStarted: true,
-          total: existing.questions.length
+          total: existing.questions.length,
+          questions: existing.questions // Critical: Return questions so frontend can render immediately
         },
         "Interview already started"
       );
