@@ -392,11 +392,46 @@ export default function InterviewClient({ sessionId }: { sessionId: string }) {
 
       addToast("Interview started successfully", "success");
 
-      // Wait a bit for database to update, then refresh
-      await new Promise(resolve => setTimeout(resolve, 1000));
-      await refresh();
+      // Optimistically update state using the response data
+      // This bypasses any fetch lag/caching issues
+      const responseData = json.data || json;
+      if (responseData.questions && Array.isArray(responseData.questions)) {
+        setData((prev) => {
+          if (!prev) return null;
 
-      // Reset loading state after refresh
+          // Map API questions to UI format
+          const newQuestions = responseData.questions.map((q: any, i: number) => ({
+            id: q.id,
+            text: q.text,
+            category: q.category,
+            difficulty: q.difficulty,
+            index: i,
+            answered: false,
+            evaluated: false
+          }));
+
+          return {
+            ...prev,
+            session: {
+              ...prev.session,
+              status: "in_progress",
+              totalQuestions: newQuestions.length,
+            },
+            questions: newQuestions,
+            // Set current question to first one
+            currentQuestion: {
+              id: newQuestions[0].id,
+              text: newQuestions[0].text,
+              category: newQuestions[0].category,
+              difficulty: newQuestions[0].difficulty,
+            }
+          };
+        });
+      }
+
+      // Refresh in background to sync fully
+      refresh().catch(() => { });
+
       setLoading(false);
     } catch (error) {
       clientLogger.error("Network error starting interview", error instanceof Error ? error : new Error(String(error)), { sessionId });
