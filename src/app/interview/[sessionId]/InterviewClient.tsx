@@ -309,27 +309,51 @@ export default function InterviewClient({ sessionId }: { sessionId: string }) {
     setReportError(null);
     setReportLoading(true);
     setIsTyping(true);
-    const res = await fetch(`/api/sessions/${sessionId}/report`, { method: "POST" });
-    const json = await res.json().catch(() => ({}));
-    setReportLoading(false);
-    setIsTyping(false);
-    if (!res.ok) {
-      setReportError(json.error || json.message || "Failed to generate report");
-      return;
-    }
-    // Handle standardized API response format
-    const responseData = json.data || json;
-    setReport(responseData.report ?? null);
-    setShareToken(responseData.shareToken ?? null);
-    setSuccessMessage("Report generated successfully");
-    setTimeout(() => setSuccessMessage(null), 3000);
-    // Fetch score summary from report endpoint
-    const reportRes = await fetch(`/api/sessions/${sessionId}/report`);
-    const reportJson = await reportRes.json().catch(() => ({}));
-    if (reportRes.ok) {
-      const reportData = reportJson.data || reportJson;
-      setReportScoreSummary(reportData.scoreSummary ?? null);
-      setShareToken(reportData.shareToken ?? null);
+
+    try {
+      // Set a long timeout (60s) to allow OpenAI to finish
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 60000);
+
+      const res = await fetch(`/api/sessions/${sessionId}/report`, {
+        method: "POST",
+        signal: controller.signal
+      });
+
+      clearTimeout(timeoutId);
+
+      const json = await res.json().catch(() => ({}));
+
+      if (!res.ok) {
+        setReportError(json.error || json.message || "Failed to generate report");
+        return;
+      }
+
+      // Handle standardized API response format
+      const responseData = json.data || json;
+      setReport(responseData.report ?? null);
+      setShareToken(responseData.shareToken ?? null);
+      setSuccessMessage("Report generated successfully");
+      setTimeout(() => setSuccessMessage(null), 3000);
+
+      // Fetch score summary from report endpoint
+      const reportRes = await fetch(`/api/sessions/${sessionId}/report`);
+      const reportJson = await reportRes.json().catch(() => ({}));
+      if (reportRes.ok) {
+        const reportData = reportJson.data || reportJson;
+        setReportScoreSummary(reportData.scoreSummary ?? null);
+        setShareToken(reportData.shareToken ?? null);
+      }
+    } catch (error: any) {
+      if (error.name === 'AbortError') {
+        setReportError("Report generation timed out. The server is taking too long. Please refresh the page to check if it completed.");
+      } else {
+        setReportError("Failed to generate report. Please try again.");
+      }
+      console.error("Report generation error:", error);
+    } finally {
+      setReportLoading(false);
+      setIsTyping(false);
     }
   }
 
