@@ -260,9 +260,10 @@ export default function InterviewClient({ sessionId }: { sessionId: string }) {
 
     // Prevent overwriting 'in_progress' with stale 'created' status from server lag/cache
     setData((current) => {
-      // If we are locally 'in_progress' (e.g. from optimistic update) but server says 'created',
+      // If we are locally 'in_progress' or 'completed' but server says 'created',
       // keep our local state to preventing looping back to start screen.
-      if (current?.session?.status === 'in_progress' && responseData?.session?.status === 'created') {
+      if ((current?.session?.status === 'in_progress' || current?.session?.status === 'completed')
+        && responseData?.session?.status === 'created') {
         console.warn("Ignoring stale 'created' status from server refresh");
         return current;
       }
