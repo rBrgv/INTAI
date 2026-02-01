@@ -14,8 +14,13 @@ Configure these in your production environment (e.g., Vercel Project Settings > 
 | `NEXT_PUBLIC_APP_URL` | `https://your-domain.com` (Optional, good for absolute links) |
 
 ## 2. Infrastructure Setup
+- [ ] **Database Setup (CRITICAL)**:
+    - Open your Supabase Dashboard -> SQL Editor.
+    - Copy content from `SUPABASE_DATABASE_SETUP.sql` (in your repo).
+    - Run the script to create all required tables (`colleges`, `interview_sessions`, etc.).
+    - **Without this, Signup and Batches will fail!**
 - [ ] **Resend**: Ensure `sbconsulting.cloud` is **Verified** in Resend Dashboard (DNS records: DKIM, SPF, DMARC).
-- [ ] **Supabase**: Ensure the `candidate_batches` and `interview_sessions` tables exist in your production database. (If using UnifiedStore toggle, ensure generic fallback is active or DB is synced).
+- [ ] **Supabase**: Ensure `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_ANON_KEY` are set in Vercel.
 
 ## 3. Feature Verification (Post-Deploy)
 Once deployed, perform a "Smoke Test":
