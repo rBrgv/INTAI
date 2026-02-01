@@ -257,7 +257,17 @@ export default function InterviewClient({ sessionId }: { sessionId: string }) {
     if (!res.ok) throw new Error(json.error || json.message || "Failed");
     // Handle standardized API response format
     const responseData = json.data || json;
-    setData(responseData);
+
+    // Prevent overwriting 'in_progress' with stale 'created' status from server lag/cache
+    setData((current) => {
+      // If we are locally 'in_progress' (e.g. from optimistic update) but server says 'created',
+      // keep our local state to preventing looping back to start screen.
+      if (current?.session?.status === 'in_progress' && responseData?.session?.status === 'created') {
+        console.warn("Ignoring stale 'created' status from server refresh");
+        return current;
+      }
+      return responseData;
+    });
     setInitialLoading(false);
     setPresence(responseData.presence || null);
     setTabSwitchCount(responseData.session?.tabSwitchCount || 0);
