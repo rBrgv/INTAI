@@ -514,6 +514,15 @@ export default function CollegePage() {
       setLoading(false);
 
       if (!res.ok) {
+        if (res.status === 403) {
+          setError("Permission denied. This can happen if your session expired or the draft is stale. Reloading...");
+          localStorage.removeItem("collegeModeDraft");
+          localStorage.removeItem("college_session"); // Optional: verify session too? No, keep session.
+          setTimeout(() => {
+            window.location.reload();
+          }, 2000);
+          return;
+        }
         const errorMessage = data.error || data.message || "Failed to create batch";
         const errorDetails = data.details ? `: ${data.details}` : "";
         setError(`${errorMessage}${errorDetails}`);
