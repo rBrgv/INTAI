@@ -31,6 +31,11 @@ export async function POST(
 
     // If already started and has questions, return success
     if (existing.questions && existing.questions.length > 0) {
+      // Ensure status is consistent. If questions exist but status is 'created', force update to 'in_progress'.
+      if (existing.status === 'created') {
+        await updateSession(params.sessionId, (s) => ({ ...s, status: 'in_progress' }));
+      }
+
       const response = apiSuccess(
         {
           alreadyStarted: true,
