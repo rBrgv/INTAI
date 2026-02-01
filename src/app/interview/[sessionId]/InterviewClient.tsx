@@ -1542,46 +1542,61 @@ export default function InterviewClient({ sessionId }: { sessionId: string }) {
       )}
 
       {/* Report Generation Loading State */}
+      {/* Report Generation Loading State - Enhanced with Immediate Scores */}
       {completed && !report && (
         <Card className="shadow-lg border-0 bg-[var(--card)]">
           <div className="p-12 text-center">
-            <div className="w-24 h-24 mx-auto mb-8 rounded-3xl bg-gradient-to-br from-emerald-500 to-green-600 flex items-center justify-center">
+            <div className="w-24 h-24 mx-auto mb-6 rounded-3xl bg-gradient-to-br from-emerald-500 to-green-600 flex items-center justify-center">
               <CheckCircle2 className="w-12 h-12 text-white animate-pulse" />
             </div>
             <h2 className="text-3xl font-bold text-[var(--text)] mb-3">Interview Complete!</h2>
             <p className="text-lg text-[var(--muted)] mb-8">Great job completing all questions</p>
 
-            <div className="max-w-md mx-auto space-y-4">
-              <div className="flex items-center gap-4 p-4 bg-[var(--bg-secondary)] rounded-xl">
-                <div className="w-10 h-10 border-4 border-indigo-600 border-t-transparent rounded-full animate-spin flex-shrink-0" />
-                <div className="text-left">
-                  <p className="text-sm font-bold text-[var(--text)]">Analyzing your responses...</p>
-                  <p className="text-xs text-[var(--muted)]">Evaluating technical skills and communication</p>
-                </div>
-              </div>
+            {data?.scoreSummary && data.scoreSummary.countEvaluated > 0 ? (
+              <div className="max-w-2xl mx-auto mb-10 animate-fade-in">
+                <div className="bg-gradient-to-br from-slate-50 to-indigo-50/30 rounded-2xl p-6 border border-indigo-100">
+                  <h3 className="text-sm font-semibold text-slate-500 uppercase tracking-wider mb-6">Preliminary Assessment</h3>
 
-              <div className="flex items-center gap-4 p-4 bg-[var(--bg-secondary)]/50 rounded-xl opacity-70">
-                <div className="w-10 h-10 bg-[var(--bg-secondary)] rounded-full flex items-center justify-center flex-shrink-0">
-                  <div className="w-5 h-5 border-2 border-[var(--muted)] rounded-full" />
-                </div>
-                <div className="text-left">
-                  <p className="text-sm font-bold text-[var(--text)]">Processing evaluation scores...</p>
-                  <p className="text-xs text-[var(--muted)]">Calculating overall performance</p>
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                    <div className="bg-white p-4 rounded-xl shadow-sm border border-indigo-100 ring-1 ring-indigo-50">
+                      <div className="text-3xl font-bold text-indigo-600 mb-1">{data.scoreSummary.avg.overall}</div>
+                      <div className="text-xs font-semibold text-slate-600">Overall</div>
+                    </div>
+                    <div className="bg-white p-4 rounded-xl shadow-sm border border-slate-100">
+                      <div className="text-2xl font-bold text-slate-700 mb-1">{data.scoreSummary.avg.technical}</div>
+                      <div className="text-xs text-slate-500">Technical</div>
+                    </div>
+                    <div className="bg-white p-4 rounded-xl shadow-sm border border-slate-100">
+                      <div className="text-2xl font-bold text-slate-700 mb-1">{data.scoreSummary.avg.communication}</div>
+                      <div className="text-xs text-slate-500">Comm.</div>
+                    </div>
+                    <div className="bg-white p-4 rounded-xl shadow-sm border border-slate-100">
+                      <div className="text-2xl font-bold text-slate-700 mb-1">{data.scoreSummary.avg.problemSolving}</div>
+                      <div className="text-xs text-slate-500">Problem Solving</div>
+                    </div>
+                  </div>
+                  <p className="text-xs text-slate-400 mt-4 italic">Scores are final. Generating detailed feedback report...</p>
                 </div>
               </div>
+            ) : (
+              <div className="max-w-md mx-auto space-y-4 mb-8">
+                <div className="flex items-center gap-4 p-4 bg-[var(--bg-secondary)] rounded-xl">
+                  <div className="w-10 h-10 border-4 border-indigo-600 border-t-transparent rounded-full animate-spin flex-shrink-0" />
+                  <div className="text-left">
+                    <p className="text-sm font-bold text-[var(--text)]">Finalizing results...</p>
+                    <p className="text-xs text-[var(--muted)]">Calculating final scores</p>
+                  </div>
+                </div>
+              </div>
+            )}
 
-              <div className="flex items-center gap-4 p-4 bg-[var(--bg-secondary)]/30 rounded-xl opacity-50">
-                <div className="w-10 h-10 bg-[var(--bg-secondary)] rounded-full flex items-center justify-center flex-shrink-0">
-                  <div className="w-5 h-5 border-2 border-[var(--muted)] rounded-full" />
-                </div>
-                <div className="text-left">
-                  <p className="text-sm font-bold text-[var(--text)]">Generating your report...</p>
-                  <p className="text-xs text-[var(--muted)]">Preparing detailed insights and recommendations</p>
-                </div>
+            <div className="max-w-md mx-auto">
+              <div className="flex items-center justify-center gap-3 text-sm text-[var(--muted)] bg-[var(--bg-secondary)]/50 py-3 rounded-full">
+                <div className="w-4 h-4 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin" />
+                <span>Generating detailed report and insights...</span>
               </div>
+              <p className="mt-4 text-xs text-[var(--muted)]">This usually takes 10-30 seconds</p>
             </div>
-
-            <p className="mt-8 text-sm text-[var(--muted)]">This usually takes 10-15 seconds</p>
           </div>
         </Card>
       )}
