@@ -9,6 +9,7 @@ import * as memoryStore from './sessionStore';
 import * as memoryCollegeStore from './collegeStore';
 import { InterviewSession, CollegeJobTemplate, CandidateBatch } from './types';
 import { logger } from './logger';
+import { invalidateCachedSession } from './cache';
 
 // ============================================
 // SESSION STORE (Unified)
@@ -51,6 +52,9 @@ export async function updateSession(
   id: string,
   updater: (s: InterviewSession) => InterviewSession
 ): Promise<InterviewSession | null> {
+  // Invalidate cache first to ensure fresh data on next fetch
+  invalidateCachedSession(id);
+
   if (isSupabaseConfigured()) {
     try {
       const result = await supabaseStore.updateSession(id, updater);
@@ -196,5 +200,3 @@ export async function logAudit(
     }
   }
 }
-
-
