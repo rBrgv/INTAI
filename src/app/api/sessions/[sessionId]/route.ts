@@ -1,22 +1,13 @@
 import { NextResponse } from "next/server";
 import { getSession } from "@/lib/unifiedStore";
 import { apiSuccess, apiError } from "@/lib/apiResponse";
-import { getCachedSession, setCachedSession } from "@/lib/cache";
 
 export async function GET(
   _req: Request,
   { params }: { params: { sessionId: string } }
 ) {
-  // Check cache first
-  const cached = getCachedSession(params.sessionId);
-  if (cached) {
-    const response = apiSuccess(cached);
-    response.headers.set('X-Cache', 'HIT');
-    response.headers.set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
-    response.headers.set('Pragma', 'no-cache');
-    response.headers.set('Expires', '0');
-    return response;
-  }
+  // Note: Server-side caching is disabled here to ensure consistency in serverless environment.
+  // Previous caching implementation caused stale data when 'start' and 'get' ran on different instances.
 
   const session = await getSession(params.sessionId);
   if (!session) {
@@ -60,9 +51,6 @@ export async function GET(
     presence: session.presence,
   };
 
-  // Cache the response for future requests
-  setCachedSession(params.sessionId, responseData);
-
   const response = apiSuccess(responseData);
 
   // Disable caching to ensure fresh data
@@ -73,4 +61,3 @@ export async function GET(
 
   return response;
 }
-
