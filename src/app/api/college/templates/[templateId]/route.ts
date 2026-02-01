@@ -13,17 +13,17 @@ export async function GET(
 ) {
   try {
     const session = requireAuthAPI(req);
-    
+
     const template = await getTemplate(params.templateId);
     if (!template) {
       return apiError("Template not found", "The requested template does not exist", 404);
     }
-    
+
     // Verify template belongs to college
     if (template.collegeId && template.collegeId !== session.collegeId) {
       return apiError("Forbidden", "You don't have access to this template", 403);
     }
-    
+
     return apiSuccess({ template });
   } catch (error) {
     if (error instanceof Error && error.message === 'Unauthorized') {
@@ -39,7 +39,7 @@ export async function PUT(
 ) {
   try {
     const session = requireAuthAPI(req);
-    
+
     const body = await req.json().catch(() => null);
     if (!body) {
       return apiError("Invalid JSON", "Request body must be valid JSON", 400);
@@ -66,10 +66,10 @@ export async function PUT(
 
     const jdText = sanitizeForStorage(rawJdText);
 
-    const topSkills = Array.isArray(body.topSkills) 
+    const topSkills = Array.isArray(body.topSkills)
       ? body.topSkills.map((s: any) => sanitizeForStorage(String(s).trim())).filter((s: string) => s.length > 0).slice(0, 5)
       : existingTemplate.topSkills;
-    
+
     if (topSkills.length === 0) {
       return apiError(
         "Validation failed",
@@ -143,7 +143,7 @@ export async function DELETE(
 ) {
   try {
     const session = requireAuthAPI(req);
-    
+
     const template = await getTemplate(params.templateId);
     if (!template) {
       return apiError("Template not found", "The requested template does not exist", 404);
@@ -156,9 +156,10 @@ export async function DELETE(
 
     // Delete from Supabase if configured
     if (isSupabaseConfigured() && supabase) {
+      // Use soft delete to prevent FK errors with candidate_batches
       const { error } = await supabase
         .from('college_job_templates')
-        .delete()
+        .update({ deleted_at: new Date().toISOString() })
         .eq('id', params.templateId)
         .eq('college_id', session.collegeId);
 

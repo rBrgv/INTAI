@@ -14,7 +14,7 @@ export async function POST(
 ) {
   try {
     const session = requireAuthAPI(req);
-    
+
     const existingTemplate = await getTemplate(params.templateId);
     if (!existingTemplate) {
       return apiError("Template not found", "The requested template does not exist", 404);
@@ -30,7 +30,7 @@ export async function POST(
       id: randomId(),
       collegeId: session.collegeId,
       jdText: existingTemplate.jdText,
-      topSkills: [...existingTemplate.topSkills],
+      topSkills: existingTemplate.topSkills.slice(0, 5),
       config: { ...existingTemplate.config },
       createdAt: Date.now(),
       createdBy: session.userEmail,
