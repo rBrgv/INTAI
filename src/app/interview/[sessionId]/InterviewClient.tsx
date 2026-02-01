@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
-import { ArrowLeft, ArrowRight, Check, Lock, ArrowRight as ArrowRightIcon, CheckCircle2, Lightbulb, Info } from "lucide-react";
+import { ArrowLeft, ArrowRight, Check, Lock, ArrowRight as ArrowRightIcon, CheckCircle2, Lightbulb, Info, AlertCircle } from "lucide-react";
 import Card from "@/components/Card";
 import Badge from "@/components/Badge";
 import Progress from "@/components/Progress";
@@ -1469,8 +1469,8 @@ export default function InterviewClient({ sessionId }: { sessionId: string }) {
                 </Card>
               )}
 
-              {/* Interview Report */}
-              {completed && (
+              {/* Interview Report - Only show when report exists */}
+              {completed && report && (
                 <Card variant="elevated" className="shadow-sm">
                   <div className="flex items-center justify-between mb-6">
                     <div>
@@ -1590,13 +1590,35 @@ export default function InterviewClient({ sessionId }: { sessionId: string }) {
               </div>
             )}
 
-            <div className="max-w-md mx-auto">
-              <div className="flex items-center justify-center gap-3 text-sm text-[var(--muted)] bg-[var(--bg-secondary)]/50 py-3 rounded-full">
-                <div className="w-4 h-4 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin" />
-                <span>Generating detailed report and insights...</span>
+            {reportError ? (
+              <div className="max-w-md mx-auto mt-8 animate-fade-in">
+                <div className="p-4 bg-red-50 border border-red-200 rounded-xl mb-4">
+                  <div className="flex items-center gap-3 text-red-800 mb-2">
+                    <AlertCircle className="w-5 h-5" />
+                    <span className="font-semibold">Generation Failed</span>
+                  </div>
+                  <p className="text-sm text-red-600 mb-4">{reportError}</p>
+                  <button
+                    onClick={() => {
+                      setReportError(null);
+                      setReportLoading(true);
+                      generateReport();
+                    }}
+                    className="w-full py-2 bg-white border border-red-200 text-red-700 font-medium rounded-lg hover:bg-red-50 transition-colors shadow-sm"
+                  >
+                    Retry Generation
+                  </button>
+                </div>
               </div>
-              <p className="mt-4 text-xs text-[var(--muted)]">This usually takes 10-30 seconds</p>
-            </div>
+            ) : (
+              <div className="max-w-md mx-auto">
+                <div className="flex items-center justify-center gap-3 text-sm text-[var(--muted)] bg-[var(--bg-secondary)]/50 py-3 rounded-full">
+                  <div className="w-4 h-4 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin" />
+                  <span>Generating detailed report and insights...</span>
+                </div>
+                <p className="mt-4 text-xs text-[var(--muted)]">This usually takes 10-30 seconds</p>
+              </div>
+            )}
           </div>
         </Card>
       )}
