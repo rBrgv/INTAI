@@ -15,12 +15,14 @@ const nextConfig = {
     ],
   },
 
-  // Webpack configuration for serverless compatibility
+  // Handle ESM-only and native dependencies
+  experimental: {
+    serverComponentsExternalPackages: ['jsdom', 'isomorphic-dompurify', 'pdfjs-dist', 'canvas', '@exodus/bytes'],
+  },
+
+  // Webpack configuration for additional tweaks if needed
   webpack: (config, { isServer }) => {
-    if (isServer) {
-      // Handle external dependencies that may cause issues in serverless
-      config.externals = [...(config.externals || []), 'canvas', 'jsdom'];
-    }
+    // Basic webpack adjustments
     return config;
   },
 
