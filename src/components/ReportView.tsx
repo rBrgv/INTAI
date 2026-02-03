@@ -1,4 +1,4 @@
-import { ArrowRight, CheckCircle2, FileDown } from "lucide-react";
+import { ArrowRight, CheckCircle2, FileDown, LogOut } from "lucide-react";
 import Card from "./Card";
 import Badge from "./Badge";
 import { sanitizeForDisplay } from "@/lib/sanitize";
@@ -31,9 +31,11 @@ type ReportViewProps = {
     mode?: string;
     role?: string;
     level?: string;
+    collegeName?: string;
   };
   readOnly?: boolean;
   viewType?: "candidate" | "recruiter"; // Default to "recruiter" for backward compatibility
+  onExit?: () => void;
 };
 
 export default function ReportView({
@@ -42,6 +44,7 @@ export default function ReportView({
   context,
   readOnly = false,
   viewType = "recruiter",
+  onExit,
 }: ReportViewProps) {
   // For candidate view, hide "no_hire" recommendation and show "borderline" instead
   const displayRecommendation = viewType === "candidate" && report.recommendation === "no_hire"
@@ -122,7 +125,16 @@ export default function ReportView({
     <div className="space-y-6" data-report-content>
       {/* Export Button - At the top */}
       {!readOnly && (
-        <div className="flex justify-end no-print mb-2">
+        <div className="flex justify-end gap-3 no-print mb-2">
+          {onExit && (
+            <button
+              onClick={onExit}
+              className="app-btn-secondary px-4 py-2 text-sm flex items-center gap-2"
+            >
+              <LogOut className="w-4 h-4" />
+              Exit
+            </button>
+          )}
           <button
             onClick={handleExportPDF}
             className="app-btn-primary px-4 py-2 text-sm flex items-center gap-2"
@@ -165,12 +177,14 @@ export default function ReportView({
           <div className="flex flex-wrap items-center gap-4 text-sm">
             {context.mode && (
               <div>
-                <span className="text-slate-500">Mode:</span>{" "}
+                <span className="text-slate-500">
+                  {context.mode === "college" && context.collegeName ? "College:" : "Mode:"}
+                </span>{" "}
                 <span className="font-medium text-slate-300">
                   {context.mode === "company"
                     ? "Company"
                     : context.mode === "college"
-                      ? "College"
+                      ? (context.collegeName || "College")
                       : "Individual"}
                 </span>
               </div>

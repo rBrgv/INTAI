@@ -344,8 +344,7 @@ export default function TemplateDashboardPage() {
         </Link>
       </div>
 
-      <h1 className="text-2xl font-semibold text-[var(--text)] mb-2">Template Dashboard</h1>
-      <p className="text-[var(--muted)] mb-6">Template ID: {templateId}</p>
+      <h1 className="text-2xl font-semibold text-[var(--text)] mb-6">Template Dashboard</h1>
 
       {error && (
         <Card className="app-card mb-6">

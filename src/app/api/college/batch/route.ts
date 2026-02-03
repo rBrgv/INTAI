@@ -68,7 +68,7 @@ export async function POST(req: NextRequest) {
       const sessionId = randomId();
       sessionIds.push(sessionId);
 
-      const session: InterviewSession = {
+      const newSession: InterviewSession = {
         id: sessionId,
         mode: "college",
         createdAt: Date.now(),
@@ -95,9 +95,10 @@ export async function POST(req: NextRequest) {
         presence: {
           phrasePrompt: "I confirm this interview response is my own.",
         },
+        collegeName: session.collegeName,
       };
 
-      createSession(session);
+      createSession(newSession);
     }
 
     const batch: CandidateBatch = {

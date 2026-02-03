@@ -142,5 +142,6 @@ export type InterviewSession = {
     answeredAt?: number;
     timeSpent?: number;
   }>; // Detailed timing per question
+  collegeName?: string;
 };
 

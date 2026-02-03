@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { useSearchParams } from "next/navigation";
+import { useSearchParams, useRouter } from "next/navigation";
 import { ArrowLeft, ArrowRight, Check, Lock, ArrowRight as ArrowRightIcon, CheckCircle2, Lightbulb, Info, AlertCircle } from "lucide-react";
 import Card from "@/components/Card";
 import Badge from "@/components/Badge";
@@ -70,6 +70,7 @@ type ApiState = {
     currentQuestionIndex: number;
     totalQuestions: number;
     startedAt?: number; // Timestamp when interview was started
+    collegeName?: string;
   };
   currentQuestion: null | {
     id: string;
@@ -159,6 +160,7 @@ function getStatusBadgeVariant(status: string): "default" | "success" | "warning
 
 export default function InterviewClient({ sessionId }: { sessionId: string }) {
   const searchParams = useSearchParams();
+  const router = useRouter();
   const isRecruiterView = searchParams.get("view") === "recruiter";
 
   const [data, setData] = useState<ApiState | null>(null);
@@ -180,7 +182,6 @@ export default function InterviewClient({ sessionId }: { sessionId: string }) {
   const [copySuccess, setCopySuccess] = useState(false);
   const [presence, setPresence] = useState<any>(null);
   const [showPresenceModal, setShowPresenceModal] = useState(false);
-  const [focusMode, setFocusMode] = useState(false);
   const [tabSwitchCount, setTabSwitchCount] = useState(0);
   const [tabSwitchWarning, setTabSwitchWarning] = useState<string | null>(null);
   const [showConfirmDialog, setShowConfirmDialog] = useState(false);
@@ -387,16 +388,18 @@ export default function InterviewClient({ sessionId }: { sessionId: string }) {
     }
   }
 
-  async function startInterview() {
+  async function startInterview(autoStart = false) {
     // Request fullscreen (Must be first to be close to user gesture)
-    try {
-      if (document.documentElement.requestFullscreen) {
-        await document.documentElement.requestFullscreen();
-      } else if ((document.documentElement as any).webkitRequestFullscreen) {
-        await (document.documentElement as any).webkitRequestFullscreen(); // Safari
+    if (!autoStart) {
+      try {
+        if (document.documentElement.requestFullscreen) {
+          await document.documentElement.requestFullscreen();
+        } else if ((document.documentElement as any).webkitRequestFullscreen) {
+          await (document.documentElement as any).webkitRequestFullscreen(); // Safari
+        }
+      } catch (e) {
+        console.warn("Fullscreen request failed", e);
       }
-    } catch (e) {
-      console.warn("Fullscreen request failed", e);
     }
 
     setError(null);
@@ -683,7 +686,7 @@ export default function InterviewClient({ sessionId }: { sessionId: string }) {
   // Auto-start interview if created (skip start screen)
   useEffect(() => {
     if (data?.session.status === "created" && !started && !loading && !initialLoading) {
-      startInterview();
+      startInterview(true);
     }
   }, [data?.session.status, started, loading, initialLoading]);
 
@@ -912,7 +915,7 @@ export default function InterviewClient({ sessionId }: { sessionId: string }) {
   const showTyping = isTyping && !!data?.currentQuestion && !loading;
 
   return (
-    <div className={`space-y-6 ${focusMode ? "bg-slate-50 p-4 rounded-lg" : ""}`}>
+    <div className="space-y-6">
       {/* Toast Manager */}
       <ToastContainer toasts={toasts} onClose={removeToast} />
 
@@ -959,17 +962,7 @@ export default function InterviewClient({ sessionId }: { sessionId: string }) {
                   ? "Completed"
                   : "Created"}
             </Badge>
-            {started && !completed && (
-              <label className="flex items-center gap-2.5 cursor-pointer px-3 py-2 bg-slate-50 rounded-lg border border-slate-200 hover:bg-slate-100 transition-colors">
-                <input
-                  type="checkbox"
-                  checked={focusMode}
-                  onChange={(e) => setFocusMode(e.target.checked)}
-                  className="w-4 h-4 rounded border-slate-300 text-indigo-600 focus:ring-2 focus:ring-indigo-500 focus:ring-offset-0"
-                />
-                <span className="text-sm font-medium text-slate-700">Focus mode</span>
-              </label>
-            )}
+
           </div>
         </div>
       </div>
@@ -1032,12 +1025,14 @@ export default function InterviewClient({ sessionId }: { sessionId: string }) {
       <Card className="shadow-lg border-0 bg-[var(--card)] mb-8 backdrop-blur-md">
         <div className="flex flex-wrap items-center gap-6">
           <div>
-            <p className="text-xs font-semibold text-[var(--muted)] mb-2 uppercase tracking-wide">Mode</p>
+            <p className="text-xs font-semibold text-[var(--muted)] mb-2 uppercase tracking-wide">
+              {data?.session.mode === "college" && data?.session.collegeName ? "College" : "Mode"}
+            </p>
             <Badge variant="info" className="px-3 py-1.5 shadow-sm font-semibold">
               {data?.session.mode === "company"
                 ? "Company"
                 : data?.session.mode === "college"
-                  ? "College"
+                  ? (data?.session.collegeName || "College")
                   : "Individual"}
             </Badge>
           </div>
@@ -1097,7 +1092,7 @@ export default function InterviewClient({ sessionId }: { sessionId: string }) {
                 Click below to generate your personalized interview questions based on your profile and the job requirements.
               </p>
               <button
-                onClick={startInterview}
+                onClick={() => startInterview(false)}
                 disabled={loading}
                 className="app-btn-primary px-8 py-4 text-lg w-full sm:w-auto"
               >
@@ -1300,11 +1295,6 @@ export default function InterviewClient({ sessionId }: { sessionId: string }) {
                         </div>
                       )}
                     </div>
-                    {focusMode && (
-                      <div className="mt-2 px-3 py-1.5 bg-amber-50 border border-amber-200 rounded-lg">
-                        <p className="text-xs font-medium text-amber-800">🔒 Focus mode active - Paste disabled</p>
-                      </div>
-                    )}
                   </div>
 
                   {/* Voice Answer Recorder */}
@@ -1324,10 +1314,8 @@ export default function InterviewClient({ sessionId }: { sessionId: string }) {
                       value={answerText}
                       onChange={(e) => setAnswerText(e.target.value)}
                       onPaste={(e) => {
-                        addToast("Paste detected. Security incident logged.", "warning");
-                        if (focusMode) {
-                          e.preventDefault();
-                        }
+                        e.preventDefault();
+                        addToast("Paste is disabled for this interview.", "warning");
                       }}
                       placeholder={(data.currentQuestion as any).answered ? "Answer submitted." : "Type your response here or use voice recording above..."}
                       disabled={loading || completed || !!(data.currentQuestion as any).answered}
@@ -1466,31 +1454,6 @@ export default function InterviewClient({ sessionId }: { sessionId: string }) {
                           {lastEval.evaluation.scores.problemSolving}
                         </p>
                       </div>
-                    </div>
-                  </div>
-
-                  <div className="grid md:grid-cols-2 gap-4">
-                    <div>
-                      <p className="text-xs font-medium text-[var(--text)] mb-2">Strengths</p>
-                      <ul className="text-xs text-[var(--muted)] space-y-1">
-                        {lastEval.evaluation.strengths.map((s, i) => (
-                          <li key={i} className="flex items-start">
-                            <CheckCircle2 className="w-3 h-3 text-green-600 mr-2 inline" />
-                            {s}
-                          </li>
-                        ))}
-                      </ul>
-                    </div>
-                    <div>
-                      <p className="text-xs font-medium text-[var(--text)] mb-2">Areas to improve</p>
-                      <ul className="text-xs text-[var(--muted)] space-y-1">
-                        {lastEval.evaluation.gaps.map((g, i) => (
-                          <li key={i} className="flex items-start">
-                            <ArrowRightIcon className="w-3 h-3 text-yellow-600 mr-2 inline" />
-                            {g}
-                          </li>
-                        ))}
-                      </ul>
                     </div>
                   </div>
 
@@ -1707,8 +1670,10 @@ export default function InterviewClient({ sessionId }: { sessionId: string }) {
               mode: data?.session.mode,
               role: data?.session.role,
               level: data?.session.level,
+              collegeName: data?.session.collegeName,
             }}
             viewType={isRecruiterView ? "recruiter" : "candidate"}
+            onExit={() => router.push('/')}
           />
         </div>
       )}
