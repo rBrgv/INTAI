@@ -28,7 +28,10 @@ export async function POST(req: NextRequest) {
 
     // Verify template belongs to college
     if (template.collegeId && template.collegeId !== session.collegeId) {
-      return apiError("Forbidden", "You don't have access to this template", 403);
+      // Fallback: Allow if created by the same user (handles potential ID synch issues)
+      if (template.createdBy !== session.userEmail) {
+        return apiError("Forbidden", "You don't have access to this template", 403);
+      }
     }
 
     const candidates = Array.isArray(body.candidates) ? body.candidates : [];

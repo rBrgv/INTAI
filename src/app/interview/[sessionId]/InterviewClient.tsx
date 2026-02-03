@@ -698,6 +698,20 @@ export default function InterviewClient({ sessionId }: { sessionId: string }) {
     }
   }, [data?.currentQuestion?.id, (data?.session as any)?.answers]);
 
+  // Ensure report is generated if completed but missing
+  useEffect(() => {
+    if (completed && !report && !reportLoading && !reportError && !initialLoading) {
+      // Check if we should generate report (avoid conflict with ongoing refresh)
+      const timer = setTimeout(() => {
+        // Double check state inside timeout
+        if (!report && !reportLoading && !reportError) {
+          generateReport();
+        }
+      }, 2000);
+      return () => clearTimeout(timer);
+    }
+  }, [completed, report, reportLoading, reportError, initialLoading]);
+
   // Security Monitors (Fullscreen, Tab Switch, Copy/Paste)
   useEffect(() => {
     if (!started || completed || isRecruiterView) return;
@@ -1099,7 +1113,7 @@ export default function InterviewClient({ sessionId }: { sessionId: string }) {
             </div>
           )}
         </Card>
-      ) : (
+      ) : !completed ? (
         <div className="relative">
           {/* Main 2-Column Layout for Desktop - Enhanced Spacing */}
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-10 max-w-7xl mx-auto">
@@ -1559,7 +1573,7 @@ export default function InterviewClient({ sessionId }: { sessionId: string }) {
             </div>
           </div>
         </div>
-      )}
+      ) : null}
 
       {/* Report Generation Loading State */}
       {/* Report Generation Loading State - Enhanced with Immediate Scores */}
@@ -1645,16 +1659,58 @@ export default function InterviewClient({ sessionId }: { sessionId: string }) {
 
       {/* Report View - Full Width */}
       {completed && report && (
-        <ReportView
-          report={report}
-          scoreSummary={reportScoreSummary || undefined}
-          context={{
-            mode: data?.session.mode,
-            role: data?.session.role,
-            level: data?.session.level,
-          }}
-          viewType={isRecruiterView ? "recruiter" : "candidate"}
-        />
+        <div className="space-y-6">
+          <Card variant="elevated" className="shadow-sm">
+            <div className="flex flex-col sm:flex-row items-center justify-between gap-4">
+              <div>
+                <h3 className="text-xl font-semibold text-[var(--text)]">Interview Report</h3>
+                <p className="text-sm text-[var(--muted)] mt-1">
+                  Comprehensive evaluation from all responses and assessments
+                </p>
+              </div>
+              <button
+                onClick={generateReport}
+                disabled={reportLoading}
+                className="app-btn-secondary px-4 py-2 text-sm flex items-center gap-2"
+              >
+                {reportLoading ? (
+                  <>
+                    <div className="w-4 h-4 border-2 border-indigo-600 border-t-transparent rounded-full animate-spin" />
+                    Regenerating...
+                  </>
+                ) : (
+                  "Regenerate Report"
+                )}
+              </button>
+            </div>
+            {shareToken && (
+              <div className="mt-4 pt-4 border-t border-slate-100 flex items-center justify-between gap-4">
+                <div className="flex-1 min-w-0">
+                  <p className="text-xs text-[var(--muted)] mb-1">Shareable report link</p>
+                  <p className="text-xs font-mono text-[var(--text)] truncate">
+                    {window.location.origin}/share/{shareToken}
+                  </p>
+                </div>
+                <button
+                  onClick={copyShareLink}
+                  className="app-btn-secondary flex-shrink-0 px-4 py-2 text-sm"
+                >
+                  {copySuccess ? "Copied" : "Copy link"}
+                </button>
+              </div>
+            )}
+          </Card>
+          <ReportView
+            report={report}
+            scoreSummary={reportScoreSummary || undefined}
+            context={{
+              mode: data?.session.mode,
+              role: data?.session.role,
+              level: data?.session.level,
+            }}
+            viewType={isRecruiterView ? "recruiter" : "candidate"}
+          />
+        </div>
       )}
     </div>
   );
